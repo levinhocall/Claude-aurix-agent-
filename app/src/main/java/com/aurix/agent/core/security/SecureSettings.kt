@@ -41,6 +41,9 @@ class SecureSettings @Inject constructor(@ApplicationContext private val context
         }.apply()
     }
 
+    fun getString(key: String): String? = prefs.getString(key, null)
+    fun putString(key: String, value: String) { prefs.edit().putString(key, value).apply() }
+
     private companion object {
         const val K_URL = "base_url"
         const val K_MODEL = "model"

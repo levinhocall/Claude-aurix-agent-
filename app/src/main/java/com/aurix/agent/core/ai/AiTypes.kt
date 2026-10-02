@@ -8,6 +8,8 @@ data class AiRequest(
     val model: String = "",
     val temperature: Double = 0.2,
     val maxTokens: Int = 2048,
+    val purpose: String = "",      // plan | replan | step | verify | test — used by the router
+    val escalate: Boolean = false, // retry after failure: router may pick a stronger model
 )
 
 data class TokenUsage(val promptTokens: Int = 0, val completionTokens: Int = 0) {
@@ -16,7 +18,7 @@ data class TokenUsage(val promptTokens: Int = 0, val completionTokens: Int = 0) 
 
 data class AiResponse(val text: String, val usage: TokenUsage, val model: String)
 
-enum class AiErrorType { NETWORK_ERROR, AUTH_ERROR, RATE_LIMIT, TIMEOUT, MODEL_ERROR, INVALID_INPUT, UNKNOWN_ERROR }
+enum class AiErrorType { NETWORK_ERROR, AUTH_ERROR, RATE_LIMIT, TIMEOUT, MODEL_ERROR, INVALID_INPUT, BUDGET_EXCEEDED, UNKNOWN_ERROR }
 
 class AiError(val type: AiErrorType, message: String, val retryAfterMs: Long? = null) : Exception(message)
 

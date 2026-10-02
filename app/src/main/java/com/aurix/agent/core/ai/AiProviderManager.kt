@@ -1,38 +1,66 @@
 package com.aurix.agent.core.ai
 
+import com.aurix.agent.core.ai.providers.anthropic.AnthropicProvider
 import com.aurix.agent.core.ai.providers.openai.OpenAiCompatibleProvider
-import com.aurix.agent.core.security.SecureSettings
-import kotlinx.coroutines.delay
+import com.aurix.agent.core.ai.routing.Failover
+import com.aurix.agent.core.ai.routing.KeyPool
+import com.aurix.agent.core.ai.routing.ModelRouter
+import com.aurix.agent.core.ai.routing.ProviderEntry
+import com.aurix.agent.core.ai.routing.ProviderStore
+import com.aurix.agent.core.ai.routing.ProviderType
+import com.aurix.agent.core.ai.routing.RoutingPolicy
+import com.aurix.agent.core.ai.routing.UsageTracker
 import okhttp3.OkHttpClient
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Phase 1: one configured OpenAI-compatible provider + bounded retry on transient errors.
- * Phase 3 replaces this with the key pool, cooldowns, routing policies and cross-provider fallback.
- */
+/** The only AI entry point for the runtime: routing policy, key pool, cooldowns and cross-provider failover. */
 @Singleton
 class AiProviderManager @Inject constructor(
-    private val settings: SecureSettings,
+    private val store: ProviderStore,
+    private val pool: KeyPool,
+    private val usage: UsageTracker,
     private val client: OkHttpClient,
 ) {
-    suspend fun complete(request: AiRequest): AiResponse {
-        val cfg = settings.load()
-            ?: throw AiError(AiErrorType.AUTH_ERROR, "No API key configured. Open Settings and add one.")
-        val provider: AiProvider = OpenAiCompatibleProvider("openai-compatible", cfg.baseUrl, client)
-        val req = if (request.model.isBlank()) request.copy(model = cfg.model) else request
-        var attempt = 0
-        while (true) {
-            try {
-                return provider.complete(req, cfg.apiKey)
-            } catch (e: AiError) {
-                val transient = e.type == AiErrorType.NETWORK_ERROR || e.type == AiErrorType.TIMEOUT || e.type == AiErrorType.RATE_LIMIT
-                if (!transient || attempt >= MAX_RETRIES) throw e
-                attempt++
-                delay((e.retryAfterMs ?: (1_000L shl attempt)).coerceAtMost(30_000L))
-            }
-        }
+    private val failover = Failover(
+        providers = { store.providers() },
+        policy = { store.policy() },
+        pool = pool,
+        adapter = { p -> adapterFor(p) },
+        checkBudget = { usage.checkBudget() },
+        onTokens = { usage.add(it) },
+    )
+
+    suspend fun complete(request: AiRequest): AiResponse = failover.complete(request)
+
+    private fun adapterFor(p: ProviderEntry): AiProvider = when (p.type) {
+        ProviderType.OPENAI_COMPATIBLE -> OpenAiCompatibleProvider(p.id, p.baseUrl, client)
+        ProviderType.ANTHROPIC -> AnthropicProvider(p.id, p.baseUrl, client)
     }
 
-    private companion object { const val MAX_RETRIES = 3 }
+    /** Pings every key of one provider with a tiny request; re-enables keys that work. */
+    suspend fun test(providerId: String): String {
+        val p = store.providers().firstOrNull { it.id == providerId } ?: return "Provider not found"
+        if (p.keys.isEmpty()) return "Add an API key first"
+        val probe = AiRequest(emptyList(), purpose = "test")
+        val model = ModelRouter.modelFor(p, RoutingPolicy.ECONOMY, probe)
+        if (model.isBlank()) return "Set a model name first"
+        val out = StringBuilder()
+        for (k in p.keys) {
+            pool.reset(k.id)
+            val t0 = System.currentTimeMillis()
+            val line = try {
+                adapterFor(p).complete(
+                    AiRequest(listOf(AiMessage("user", "Reply with the single word OK.")), model = model, maxTokens = 16, purpose = "test"),
+                    k.secret,
+                )
+                "OK (${System.currentTimeMillis() - t0} ms, model $model)"
+            } catch (e: AiError) {
+                if (e.type == AiErrorType.AUTH_ERROR) pool.disable(k.id, "auth failed")
+                "${e.type}: ${e.message}"
+            }
+            out.append(k.label).append(": ").append(line).append('\n')
+        }
+        return out.toString().trim()
+    }
 }

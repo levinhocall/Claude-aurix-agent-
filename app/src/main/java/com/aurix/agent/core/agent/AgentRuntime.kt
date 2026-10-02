@@ -71,7 +71,7 @@ class AgentRuntime @Inject constructor(
             end(missionId, e.status, "Failed", e.message)
         } catch (e: AiError) {
             val userFixable = e.type == AiErrorType.AUTH_ERROR || e.type == AiErrorType.NETWORK_ERROR ||
-                e.type == AiErrorType.RATE_LIMIT || e.type == AiErrorType.TIMEOUT
+                e.type == AiErrorType.RATE_LIMIT || e.type == AiErrorType.TIMEOUT || e.type == AiErrorType.BUDGET_EXCEEDED
             if (userFixable) end(missionId, MissionStatus.PAUSED, "Paused (${e.type.name}) — fix and tap Resume", e.message)
             else end(missionId, MissionStatus.FAILED, "Failed", "${e.type.name}: ${e.message}")
         } catch (e: Exception) {
@@ -132,7 +132,7 @@ class AgentRuntime @Inject constructor(
         while (true) {
             currentCoroutineContext().ensureActive()
             val prompt = if (scratch.isEmpty()) base else base + "\n\nTool observations so far in this step:" + scratch
-            val o = extractJson(model(r, "step", system, prompt, 4096))
+            val o = extractJson(model(r, "step", system, prompt, 4096, attempt > 1))
             if (o == null) {
                 recover(r, steps, step, attempt, "Model returned invalid or truncated JSON (keep file chunks small)")
                 return
@@ -239,13 +239,13 @@ class AgentRuntime @Inject constructor(
     }
 
     // ---------------------------------------------------------------- helpers
-    private suspend fun model(r: Run, purpose: String, system: String, user: String, maxTokens: Int): String {
+    private suspend fun model(r: Run, purpose: String, system: String, user: String, maxTokens: Int, escalate: Boolean = false): String {
         val m = r.m
         if (m.iterations >= limits.maxIterations) throw StopMission(MissionStatus.FAILED, "Iteration limit reached (${limits.maxIterations})")
         if (System.currentTimeMillis() - r.startedAt > limits.maxMissionMillis) throw StopMission(MissionStatus.FAILED, "Time limit reached for this run")
         if (m.tokensUsed >= limits.maxTokens) throw StopMission(MissionStatus.FAILED, "Token budget reached (${limits.maxTokens})")
         events.emit(m.id, AgentEventType.MODEL_REQUEST, purpose)
-        val resp = ai.complete(AiRequest(listOf(AiMessage("system", system), AiMessage("user", user)), maxTokens = maxTokens))
+        val resp = ai.complete(AiRequest(listOf(AiMessage("system", system), AiMessage("user", user)), maxTokens = maxTokens, purpose = purpose, escalate = escalate))
         val used = if (resp.usage.total > 0) resp.usage.total else (user.length + system.length + resp.text.length) / 4
         r.m = save(r.m.copy(iterations = r.m.iterations + 1, tokensUsed = r.m.tokensUsed + used))
         events.emit(m.id, AgentEventType.MODEL_RESPONSE, "$purpose, ~$used tokens")

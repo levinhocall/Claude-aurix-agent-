@@ -26,4 +26,11 @@ interface MissionDao {
 
     @Query("UPDATE missions SET status = 'PAUSED', currentAction = :msg, updatedAt = :now WHERE status IN ('PLANNING','RUNNING','RECOVERING','WAITING_FOR_TOOL')")
     suspend fun markInterrupted(msg: String, now: Long): Int
+
+    @Insert suspend fun insertToolCall(c: ToolCallEntity)
+    @Query("SELECT * FROM tool_calls WHERE missionId = :id ORDER BY id DESC LIMIT 100") fun observeToolCalls(id: String): Flow<List<ToolCallEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertFile(f: MissionFileEntity)
+    @Query("SELECT * FROM mission_files WHERE missionId = :id ORDER BY createdAt") fun observeFiles(id: String): Flow<List<MissionFileEntity>>
+    @Query("SELECT * FROM mission_files WHERE missionId = :id ORDER BY createdAt") suspend fun getFiles(id: String): List<MissionFileEntity>
 }

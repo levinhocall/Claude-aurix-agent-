@@ -14,7 +14,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "0.1.0-phase1"
+        versionName = "0.2.0-phase2"
     }
     buildTypes {
         release { isMinifyEnabled = false }
@@ -45,6 +45,7 @@ dependencies {
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
     implementation(libs.okhttp)
+    implementation(libs.jsoup)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)

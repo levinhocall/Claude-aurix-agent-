@@ -10,25 +10,31 @@ import com.aurix.agent.core.mission.MissionEntity
 import com.aurix.agent.core.mission.MissionStatus
 import com.aurix.agent.core.mission.StepEntity
 import com.aurix.agent.core.mission.StepStatus
+import com.aurix.agent.core.tools.ToolExecutor
+import com.aurix.agent.core.tools.ToolRegistry
+import com.aurix.agent.core.tools.Workspace
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Task -> Plan -> Execute -> Observe -> Verify -> Recover -> Complete.
+ * Task -> Plan -> Execute (ReAct tool loop per step) -> Observe -> Verify -> Recover -> Complete.
  * Every transition is checkpointed in Room, so run(id) can resume an interrupted mission.
- * Phase 1: no tools yet — steps are reasoning/writing only, and the prompts forbid faking tool use.
  */
 @Singleton
 class AgentRuntime @Inject constructor(
     private val dao: MissionDao,
     private val ai: AiProviderManager,
     private val events: AgentEvents,
+    private val registry: ToolRegistry,
+    private val tools: ToolExecutor,
+    private val workspace: Workspace,
 ) {
     private val limits = AgentLimits()
     private val stopRequests = ConcurrentHashMap<String, MissionStatus>()
@@ -78,7 +84,7 @@ class AgentRuntime @Inject constructor(
         r.m = save(r.m.copy(status = MissionStatus.PLANNING, currentAction = "Creating plan"))
         var titles: List<String>? = null
         for (attempt in 1..limits.maxPlanAttempts) {
-            titles = parseStepList(model(r, "plan", AgentPrompts.PLAN, "Objective: ${r.m.objective}"))
+            titles = parseStepList(model(r, "plan", AgentPrompts.plan(registry.catalog()), "Objective: ${r.m.objective}", 1024))
             if (titles != null) break
             events.emit(r.m.id, AgentEventType.RECOVERY_STARTED, "Plan was not valid JSON (attempt $attempt)")
         }
@@ -110,19 +116,52 @@ class AgentRuntime @Inject constructor(
         r.m = save(r.m.copy(currentStep = doneCount, totalSteps = steps.size, currentAction = step.title))
         events.emit(id, AgentEventType.STEP_STARTED, "${doneCount + 1}/${steps.size}: ${step.title}")
 
-        val prompt = buildString {
+        val base = buildString {
             append("Objective: ${r.m.objective}\n\nPlan:\n")
             append(steps.joinToString("\n") { "${it.idx + 1}. ${it.title} [${it.status}]" })
             append("\n\nCompleted so far:\n")
-            append(steps.filter { it.status == StepStatus.DONE }.joinToString("\n") { "- ${it.title}: ${it.result.orEmpty().take(600)}" }.ifEmpty { "(nothing yet)" })
+            append(steps.filter { it.status == StepStatus.DONE }.joinToString("\n") { "- ${it.title}: ${it.result.orEmpty().take(1500)}" }.ifEmpty { "(nothing yet)" })
             append("\n\nCurrent step: ${step.title}")
             if (step.attempts > 0 && !step.result.isNullOrBlank()) append("\nPrevious attempt failed: ${step.result}")
         }
-        val o = extractJson(model(r, "step", AgentPrompts.STEP, prompt))
-        val result = o?.optString("result").orEmpty()
-        when {
-            o == null -> recover(r, steps, step, attempt, "Model returned invalid JSON")
-            o.optString("status") == "done" -> {
+        val system = AgentPrompts.step(registry.catalog())
+        val scratch = StringBuilder()
+        val seen = HashMap<String, Int>()
+        var calls = 0
+
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val prompt = if (scratch.isEmpty()) base else base + "\n\nTool observations so far in this step:" + scratch
+            val o = extractJson(model(r, "step", system, prompt, 4096))
+            if (o == null) {
+                recover(r, steps, step, attempt, "Model returned invalid or truncated JSON (keep file chunks small)")
+                return
+            }
+            if (o.optString("action") == "tool") {
+                calls += 1
+                if (calls > limits.maxToolCallsPerStep) {
+                    recover(r, steps, step, attempt, "Too many tool calls without finishing the step")
+                    return
+                }
+                val name = o.optString("tool").trim()
+                val input = o.optJSONObject("input") ?: JSONObject()
+                val key = "$name|$input"
+                val n = (seen[key] ?: 0) + 1
+                seen[key] = n
+                if (n >= limits.loopRepeatThreshold) {
+                    recover(r, steps, step, attempt, "Loop detected: identical tool call repeated")
+                    return
+                }
+                r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_TOOL, currentAction = "Using $name"))
+                val res = tools.execute(id, step.idx, name, input)
+                r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = step.title))
+                scratch.append("\n[#").append(calls).append(' ').append(name).append(' ').append(input.toString().take(300)).append("] -> ")
+                scratch.append(if (res.ok) "OK\n" else "ERROR ${res.errorType}\n").append(res.output.take(3000)).append('\n')
+                if (scratch.length > 9000) scratch.delete(0, scratch.length - 9000)
+                continue
+            }
+            val result = o.optString("result")
+            if (o.optString("status") == "done") {
                 val h = (step.title + "|" + result).hashCode()
                 r.recent.addLast(h)
                 if (r.recent.size > 6) r.recent.removeFirst()
@@ -131,8 +170,10 @@ class AgentRuntime @Inject constructor(
                     throw StopMission(MissionStatus.FAILED, "Loop detected: identical step output repeated")
                 events.emit(id, AgentEventType.STEP_COMPLETED, step.title)
                 r.m = save(r.m.copy(currentStep = doneCount + 1))
+            } else {
+                recover(r, steps, step, attempt, result.ifBlank { "Step blocked" })
             }
-            else -> recover(r, steps, step, attempt, result.ifBlank { "Step blocked" })
+            return
         }
     }
 
@@ -157,7 +198,7 @@ class AgentRuntime @Inject constructor(
     private suspend fun replan(r: Run, steps: List<StepEntity>, failed: StepEntity, reason: String) {
         val id = r.m.id
         val done = steps.filter { it.status == StepStatus.DONE }.joinToString("\n") { "- ${it.title}: ${it.result.orEmpty().take(400)}" }.ifEmpty { "(nothing)" }
-        val raw = model(r, "replan", AgentPrompts.REPLAN, "Objective: ${r.m.objective}\nCompleted:\n$done\nFailed step: ${failed.title}\nReason: $reason")
+        val raw = model(r, "replan", AgentPrompts.replan(registry.catalog()), "Objective: ${r.m.objective}\nCompleted:\n$done\nFailed step: ${failed.title}\nReason: $reason", 1024)
         val titles = parseStepList(raw) ?: throw StopMission(MissionStatus.FAILED, "INVALID_INPUT: could not revise the plan")
         dao.deleteUnfinishedSteps(id)
         val start = (dao.getSteps(id).maxOfOrNull { it.idx } ?: -1) + 1
@@ -172,7 +213,12 @@ class AgentRuntime @Inject constructor(
         val id = r.m.id
         r.m = save(r.m.copy(currentStep = steps.count { it.status == StepStatus.DONE }, currentAction = "Verifying result"))
         val results = steps.joinToString("\n") { "${it.idx + 1}. ${it.title} [${it.status}]: ${it.result.orEmpty().take(1500)}" }
-        val o = extractJson(model(r, "verify", AgentPrompts.VERIFY, "Objective: ${r.m.objective}\n\nExecuted steps:\n$results"))
+        val files = dao.getFiles(id).joinToString("\n") { f ->
+            val preview = try { workspace.resolve(id, f.path).readText().take(1500) } catch (e: Exception) { "(unreadable)" }
+            "- ${f.path} (${f.sizeBytes} bytes, verified to exist). Preview:\n$preview"
+        }.ifEmpty { "(no files were created)" }
+        val raw = model(r, "verify", AgentPrompts.VERIFY, "Objective: ${r.m.objective}\n\nExecuted steps:\n$results\n\nFiles:\n$files", 3000)
+        val o = extractJson(raw)
         val summary = o?.optString("final_answer").orEmpty()
         if (o != null && o.optBoolean("satisfied") && summary.isNotBlank()) {
             r.m = save(r.m.copy(finalResult = summary))
@@ -193,13 +239,13 @@ class AgentRuntime @Inject constructor(
     }
 
     // ---------------------------------------------------------------- helpers
-    private suspend fun model(r: Run, purpose: String, system: String, user: String): String {
+    private suspend fun model(r: Run, purpose: String, system: String, user: String, maxTokens: Int): String {
         val m = r.m
         if (m.iterations >= limits.maxIterations) throw StopMission(MissionStatus.FAILED, "Iteration limit reached (${limits.maxIterations})")
         if (System.currentTimeMillis() - r.startedAt > limits.maxMissionMillis) throw StopMission(MissionStatus.FAILED, "Time limit reached for this run")
         if (m.tokensUsed >= limits.maxTokens) throw StopMission(MissionStatus.FAILED, "Token budget reached (${limits.maxTokens})")
         events.emit(m.id, AgentEventType.MODEL_REQUEST, purpose)
-        val resp = ai.complete(AiRequest(listOf(AiMessage("system", system), AiMessage("user", user))))
+        val resp = ai.complete(AiRequest(listOf(AiMessage("system", system), AiMessage("user", user)), maxTokens = maxTokens))
         val used = if (resp.usage.total > 0) resp.usage.total else (user.length + system.length + resp.text.length) / 4
         r.m = save(r.m.copy(iterations = r.m.iterations + 1, tokensUsed = r.m.tokensUsed + used))
         events.emit(m.id, AgentEventType.MODEL_RESPONSE, "$purpose, ~$used tokens")

@@ -59,3 +59,26 @@ data class EventEntity(
     val type: String,
     val detail: String,
 )
+
+@Entity(tableName = "tool_calls", indices = [Index("missionId")])
+data class ToolCallEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val missionId: String,
+    val stepIdx: Int,
+    val tool: String,
+    val input: String,
+    val ok: Boolean,
+    val errorType: String?,
+    val output: String,
+    val durationMs: Long,
+    val ts: Long,
+)
+
+@Entity(tableName = "mission_files", primaryKeys = ["missionId", "path"], indices = [Index("missionId")])
+data class MissionFileEntity(
+    val missionId: String,
+    val path: String,
+    val sizeBytes: Long,
+    val createdAt: Long,
+    val verified: Boolean,
+)

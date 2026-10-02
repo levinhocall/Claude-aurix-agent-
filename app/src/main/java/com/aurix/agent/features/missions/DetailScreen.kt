@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -43,6 +44,8 @@ fun DetailScreen(onBack: () -> Unit, vm: DetailViewModel = hiltViewModel()) {
     val mission by vm.mission.collectAsStateWithLifecycle()
     val steps by vm.steps.collectAsStateWithLifecycle()
     val events by vm.events.collectAsStateWithLifecycle()
+    val files by vm.files.collectAsStateWithLifecycle()
+    val ctx = LocalContext.current
     val fmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     Scaffold(
@@ -95,6 +98,18 @@ fun DetailScreen(onBack: () -> Unit, vm: DetailViewModel = hiltViewModel()) {
                             Text("$icon  ${s.title}")
                             if (s.status == StepStatus.FAILED && !s.result.isNullOrBlank())
                                 Text(s.result.take(200), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+                if (files.isNotEmpty()) {
+                    item { Text("Files", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary) }
+                    items(files, key = { "f-${it.path}" }) { f ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(f.path)
+                                Text("${f.sizeBytes} bytes · verified", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            TextButton(onClick = { shareFile(ctx, vm.fileFor(f.path)) }) { Text("Share") }
                         }
                     }
                 }

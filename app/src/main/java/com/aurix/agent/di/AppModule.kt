@@ -4,6 +4,17 @@ import android.content.Context
 import androidx.room.Room
 import com.aurix.agent.core.mission.AppDatabase
 import com.aurix.agent.core.mission.MissionDao
+import com.aurix.agent.core.tools.CalculatorTool
+import com.aurix.agent.core.tools.FileEditTool
+import com.aurix.agent.core.tools.FileListTool
+import com.aurix.agent.core.tools.FileReadTool
+import com.aurix.agent.core.tools.FileWriteTool
+import com.aurix.agent.core.tools.ToolRegistry
+import com.aurix.agent.core.tools.Workspace
+import com.aurix.agent.core.tools.web.SafeFetcher
+import com.aurix.agent.core.tools.web.SearchManager
+import com.aurix.agent.core.tools.web.WebBrowserTool
+import com.aurix.agent.core.tools.web.WebSearchTool
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -24,7 +35,9 @@ import javax.inject.Singleton
 object AppModule {
     @Provides @Singleton
     fun provideDb(@ApplicationContext c: Context): AppDatabase =
-        Room.databaseBuilder(c, AppDatabase::class.java, "aurix.db").build() // no destructive migration: mission state must survive
+        Room.databaseBuilder(c, AppDatabase::class.java, "aurix.db")
+            .fallbackToDestructiveMigrationFrom(1) // v1 (Phase 1 test data) only; later versions get real migrations
+            .build()
 
     @Provides fun provideDao(db: AppDatabase): MissionDao = db.missionDao()
 
@@ -37,4 +50,13 @@ object AppModule {
 
     @Provides @Singleton @ApplicationScope
     fun provideScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    @Provides @Singleton
+    fun provideToolRegistry(search: SearchManager, fetcher: SafeFetcher, ws: Workspace): ToolRegistry = ToolRegistry(
+        listOf(
+            WebSearchTool(search), WebBrowserTool(fetcher),
+            FileWriteTool(ws), FileReadTool(ws), FileEditTool(ws), FileListTool(ws),
+            CalculatorTool(),
+        )
+    )
 }

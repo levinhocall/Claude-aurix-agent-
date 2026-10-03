@@ -14,8 +14,10 @@ class ProviderStore @Inject constructor(private val secure: SecureSettings) {
     @Synchronized fun providers(): List<ProviderEntry> {
         cache?.let { return it }
         val raw = secure.getString(K_PROVIDERS)
-        val list = if (raw != null) ProviderCodec.decode(raw) else migrateLegacy()
+        val decoded = if (raw != null) ProviderCodec.decode(raw) else migrateLegacy()
+        val list = decoded.map { fixKnownBad(it) }
         cache = list
+        if (list != decoded) save(list)
         return list
     }
 
@@ -32,6 +34,15 @@ class ProviderStore @Inject constructor(private val secure: SecureSettings) {
     }
 
     fun setPolicy(p: RoutingPolicy) { secure.putString(K_POLICY, p.name); policyCache = p }
+
+    /** Models that hijack the JSON protocol with native tool calls (e.g. Groq gpt-oss / compound) are swapped for a safe one. */
+    private fun fixKnownBad(p: ProviderEntry): ProviderEntry {
+        if (!p.baseUrl.contains("groq.com")) return p
+        fun bad(m: String) = m.contains("gpt-oss") || m.contains("compound")
+        val strong = if (bad(p.strongModel)) "llama-3.3-70b-versatile" else p.strongModel
+        val fast = if (bad(p.fastModel)) "llama-3.1-8b-instant" else p.fastModel
+        return if (strong == p.strongModel && fast == p.fastModel) p else p.copy(strongModel = strong, fastModel = fast)
+    }
 
     /** Phase 1 stored a single key; carry it over so the user does not have to re-enter it. */
     private fun migrateLegacy(): List<ProviderEntry> {

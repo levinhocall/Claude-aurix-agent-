@@ -97,3 +97,27 @@ class FailoverTest {
         assertEquals(list, ProviderCodec.decode(ProviderCodec.encode(list)))
     }
 }
+
+class ModelFallbackTest {
+    @Test fun toolMisfireFallsBackToOtherModelOfSameProvider() = runBlocking {
+        val seen = mutableListOf<String>()
+        val prov = object : AiProvider {
+            override val id = "g"
+            override suspend fun complete(request: AiRequest, apiKey: String): AiResponse {
+                seen += request.model
+                if (request.model == "strong-g") throw AiError(AiErrorType.MODEL_ERROR, "HTTP 400: Tool choice is none", modelSpecific = true)
+                return ok("recovered")
+            }
+        }
+        val p = prov("g", "k")
+        val f = Failover({ listOf(p) }, { RoutingPolicy.QUALITY }, KeyPool { 0L }, { prov }, {}, {}, { })
+        assertEquals("recovered", f.complete(AiRequest(emptyList())).text)
+        assertEquals(listOf("strong-g", "fast-g"), seen)
+    }
+
+    @Test fun toolChoiceNoneIs400MappedAsModelSpecific() {
+        val e = mapHttpError(400, null, """{"error":{"message":"Tool choice is none, but model called a tool"}}""", "secret")
+        assertEquals(AiErrorType.MODEL_ERROR, e.type)
+        assertTrue(e.modelSpecific)
+    }
+}

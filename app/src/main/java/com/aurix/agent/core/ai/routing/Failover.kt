@@ -40,7 +40,13 @@ internal class Failover(
                     tried++
                     pool.markUsed(key.id)
                     try {
-                        val resp = callOnce(p, request.copy(model = model), key.secret)
+                        val resp = try {
+                            callOnce(p, request.copy(model = model), key.secret)
+                        } catch (e: AiError) {
+                            val alt = if (e.modelSpecific) ModelRouter.alternateModel(p, model) else null
+                            if (alt == null) throw e
+                            callOnce(p, request.copy(model = alt), key.secret)
+                        }
                         pool.success(key.id, resp.usage.total)
                         onTokens(resp.usage.total)
                         return resp

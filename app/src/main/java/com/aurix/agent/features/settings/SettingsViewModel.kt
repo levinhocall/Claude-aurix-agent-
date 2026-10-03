@@ -107,7 +107,7 @@ class SettingsViewModel @Inject constructor(
             try {
                 p.keys.forEach { pool.reset(it.id) }
                 val ids = discovery.listModels(p.type, p.baseUrl, k.secret)
-                val pick = com.aurix.agent.core.ai.routing.ModelPicker.pick(p.type, ids, p.strongModel, p.fastModel)
+                val pick = com.aurix.agent.core.ai.routing.ModelPicker.pick(p.type, ids, p.strongModel, p.fastModel, p.baseUrl)
                 store.save(store.providers().map { if (it.id == p.id) it.copy(strongModel = pick.strong, fastModel = pick.fast) else it })
                 _message.value = "✓ ${p.name} OK — best model: ${pick.strong}"
             } catch (e: AiError) {

@@ -24,7 +24,9 @@ internal fun mapHttpError(code: Int, retryAfter: String?, body: String, secret: 
         in 500..599 -> AiErrorType.MODEL_ERROR
         else -> AiErrorType.UNKNOWN_ERROR
     }
-    return AiError(type, "HTTP $code: ${redactSecret(detail.take(300), secret)}", retryAfter?.toLongOrNull()?.times(1000))
+    val toolMisfire = code == 400 && Regex("tool choice|tool_use_failed|failed to call a function|tool call", RegexOption.IGNORE_CASE).containsMatchIn(detail)
+    val finalType = if (toolMisfire) AiErrorType.MODEL_ERROR else type
+    return AiError(finalType, "HTTP $code: ${redactSecret(detail.take(300), secret)}", retryAfter?.toLongOrNull()?.times(1000), modelSpecific = toolMisfire)
 }
 
 /** POST JSON, map every failure to a categorized AiError, never leak the secret. */

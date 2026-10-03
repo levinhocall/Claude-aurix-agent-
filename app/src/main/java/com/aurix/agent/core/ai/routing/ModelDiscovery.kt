@@ -27,7 +27,7 @@ class ModelDiscovery @Inject constructor(private val client: OkHttpClient) {
     suspend fun pick(preset: Preset, secret: String): Pair<ModelPicker.Pick, String?> {
         return try {
             val ids = listModels(preset.type, preset.baseUrl, secret)
-            ModelPicker.pick(preset.type, ids, preset.strong, preset.fast) to null
+            ModelPicker.pick(preset.type, ids, preset.strong, preset.fast, preset.baseUrl) to null
         } catch (e: AiError) {
             if (e.type == com.aurix.agent.core.ai.AiErrorType.AUTH_ERROR) throw e
             ModelPicker.Pick(preset.strong, preset.fast) to "Could not list models (${e.type}); using defaults"

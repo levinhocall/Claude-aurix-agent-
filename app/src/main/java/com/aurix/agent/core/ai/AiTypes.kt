@@ -20,7 +20,7 @@ data class AiResponse(val text: String, val usage: TokenUsage, val model: String
 
 enum class AiErrorType { NETWORK_ERROR, AUTH_ERROR, RATE_LIMIT, TIMEOUT, MODEL_ERROR, INVALID_INPUT, BUDGET_EXCEEDED, UNKNOWN_ERROR }
 
-class AiError(val type: AiErrorType, message: String, val retryAfterMs: Long? = null) : Exception(message)
+class AiError(val type: AiErrorType, message: String, val retryAfterMs: Long? = null, val modelSpecific: Boolean = false) : Exception(message)
 
 /** Provider-specific code lives behind this interface. The runtime never sees a concrete provider. */
 interface AiProvider {

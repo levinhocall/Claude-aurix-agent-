@@ -46,3 +46,17 @@ class PickerTest {
         assertEquals("S", p.strong); assertEquals("F", p.fast)
     }
 }
+
+class GroqPickerTest {
+    @Test fun groqNeverPicksGptOss() {
+        val ids = listOf("openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3-32b", "groq/compound")
+        val p = ModelPicker.pick(ProviderType.OPENAI_COMPATIBLE, ids, "d", "d", "https://api.groq.com/openai/v1")
+        assertEquals("llama-3.3-70b-versatile", p.strong)
+        assertEquals("llama-3.1-8b-instant", p.fast)
+    }
+
+    @Test fun genericExcludesToolHijackers() {
+        val p = ModelPicker.pick(ProviderType.OPENAI_COMPATIBLE, listOf("openai/gpt-oss-120b", "some-model-2"), "d", "d")
+        assertEquals("some-model-2", p.strong)
+    }
+}

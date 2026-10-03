@@ -19,4 +19,8 @@ object ModelRouter {
         val chosen = if (strong) p.strongModel else p.fastModel
         return chosen.ifBlank { if (strong) p.fastModel else p.strongModel }
     }
+
+    /** A different model of the same provider (used when one model misbehaves, e.g. emits native tool calls). */
+    fun alternateModel(p: ProviderEntry, current: String): String? =
+        listOf(p.strongModel, p.fastModel).filter { it.isNotBlank() && it != current }.firstOrNull()
 }

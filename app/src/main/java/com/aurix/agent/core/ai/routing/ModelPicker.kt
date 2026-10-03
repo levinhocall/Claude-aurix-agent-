@@ -8,13 +8,19 @@ object ModelPicker {
     data class Pick(val strong: String, val fast: String)
 
     private val exclude = Regex(
-        "embed|moderation|whisper|tts|audio|realtime|transcribe|image|dall|search|guard|safeguard|instruct|distil|computer-use|codex|diffusion|veo|imagen|aqa|gemma|learnlm|robotics|native|chatgpt|-live|deprecated|vision-preview|-ft",
+        "embed|moderation|whisper|tts|audio|realtime|transcribe|image|dall|search|guard|safeguard|instruct|distil|computer-use|codex|diffusion|veo|imagen|aqa|gemma|learnlm|robotics|native|chatgpt|-live|deprecated|vision-preview|-ft|gpt-oss|compound",
         RegexOption.IGNORE_CASE,
     )
     private val fastWords = Regex("(?<![a-z])(mini|nano)|flash|lite|haiku|instant|small|8b|9b|turbo", RegexOption.IGNORE_CASE)
     private val datedId = Regex("\\d{4}-\\d{2}-\\d{2}|-\\d{8}$|-\\d{4}$")
 
-    fun pick(type: ProviderType, rawIds: List<String>, defStrong: String, defFast: String): Pick {
+    fun pick(type: ProviderType, rawIds: List<String>, defStrong: String, defFast: String, host: String = ""): Pick {
+        if (host.contains("groq.com")) {
+            val have = rawIds.map { it.removePrefix("models/") }.toSet()
+            val s = listOf("llama-3.3-70b-versatile", "llama-3.1-70b-versatile").firstOrNull { it in have }
+            val fa = listOf("llama-3.1-8b-instant").firstOrNull { it in have }
+            if (s != null) return Pick(s, fa ?: s)
+        }
         val ids0 = rawIds.map { it.removePrefix("models/") }.filter { it.isNotBlank() && !exclude.containsMatchIn(it) }.distinct()
         if (ids0.isEmpty()) return Pick(defStrong, defFast)
         // prefer stable aliases over dated snapshots / previews when both exist

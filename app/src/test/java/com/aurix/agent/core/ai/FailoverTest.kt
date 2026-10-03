@@ -101,7 +101,7 @@ class FailoverTest {
 class ModelFallbackTest {
     @Test fun toolMisfireFallsBackToOtherModelOfSameProvider() = runBlocking {
         val seen = mutableListOf<String>()
-        val prov = object : AiProvider {
+        val fake = object : AiProvider {
             override val id = "g"
             override suspend fun complete(request: AiRequest, apiKey: String): AiResponse {
                 seen += request.model
@@ -110,7 +110,7 @@ class ModelFallbackTest {
             }
         }
         val p = prov("g", "k")
-        val f = Failover({ listOf(p) }, { RoutingPolicy.QUALITY }, KeyPool { 0L }, { prov }, {}, {}, { })
+        val f = Failover({ listOf(p) }, { RoutingPolicy.QUALITY }, KeyPool { 0L }, { fake }, {}, {}, { })
         assertEquals("recovered", f.complete(AiRequest(emptyList())).text)
         assertEquals(listOf("strong-g", "fast-g"), seen)
     }

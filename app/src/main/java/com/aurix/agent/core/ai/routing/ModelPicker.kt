@@ -11,7 +11,7 @@ object ModelPicker {
         "embed|moderation|whisper|tts|audio|realtime|transcribe|image|dall|search|guard|safeguard|instruct|distil|computer-use|codex|diffusion|veo|imagen|aqa|gemma|learnlm|robotics|native|chatgpt|-live|deprecated|vision-preview|-ft",
         RegexOption.IGNORE_CASE,
     )
-    private val fastWords = Regex("mini|nano|flash|lite|haiku|instant|small|8b|9b|turbo", RegexOption.IGNORE_CASE)
+    private val fastWords = Regex("(?<![a-z])(mini|nano)|flash|lite|haiku|instant|small|8b|9b|turbo", RegexOption.IGNORE_CASE)
     private val datedId = Regex("\\d{4}-\\d{2}-\\d{2}|-\\d{8}$|-\\d{4}$")
 
     fun pick(type: ProviderType, rawIds: List<String>, defStrong: String, defFast: String): Pick {

@@ -3,6 +3,8 @@ package com.aurix.agent.features.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aurix.agent.core.ai.AiError
+import com.aurix.agent.core.approval.AgentSettings
+import com.aurix.agent.core.approval.PermissionMode
 import com.aurix.agent.core.ai.AiErrorType
 import com.aurix.agent.core.ai.routing.KeyDetector
 import com.aurix.agent.core.ai.routing.KeyEntry
@@ -27,6 +29,7 @@ data class SettingsState(
     val dailyBudget: Long = 0,
     val todayTokens: Long = 0,
     val busy: Boolean = false,
+    val strictApprovals: Boolean = false,
 )
 
 @HiltViewModel
@@ -35,6 +38,7 @@ class SettingsViewModel @Inject constructor(
     private val pool: KeyPool,
     private val usage: UsageTracker,
     private val discovery: ModelDiscovery,
+    private val agentSettings: AgentSettings,
 ) : ViewModel() {
     private val _ui = MutableStateFlow(SettingsState())
     val ui: StateFlow<SettingsState> = _ui.asStateFlow()
@@ -46,7 +50,7 @@ class SettingsViewModel @Inject constructor(
     init { viewModelScope.launch(Dispatchers.IO) { reload() } }
 
     private fun reload(busy: Boolean = _ui.value.busy) {
-        _ui.value = SettingsState(store.providers(), store.policy(), usage.budget(), usage.today(), busy)
+        _ui.value = SettingsState(store.providers(), store.policy(), usage.budget(), usage.today(), busy, agentSettings.mode() == PermissionMode.STRICT)
         refreshStatus()
     }
 
@@ -120,6 +124,8 @@ class SettingsViewModel @Inject constructor(
     fun setSaveCost(on: Boolean) {
         viewModelScope.launch(Dispatchers.IO) { store.setPolicy(if (on) RoutingPolicy.BALANCED else RoutingPolicy.QUALITY); reload() }
     }
+
+    fun setStrict(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setMode(if (on) PermissionMode.STRICT else PermissionMode.STANDARD); reload() } }
 
     fun setBudget(v: Long) { viewModelScope.launch(Dispatchers.IO) { usage.setBudget(v); reload() } }
 }

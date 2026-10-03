@@ -17,6 +17,7 @@ $catalog
 
 Rules:
 - Do NOT use the API's native function/tool calling or built-in tools (browser, python, etc.). Reply with the JSON text object only; tools are invoked solely through the JSON above.
+- Phone actions (apps, calls, SMS, alarms, media...) use the device tools. Sensitive ones ask the user for approval automatically, so just call them. A device tool returning OK means the request was delivered to Android, not that the outcome is confirmed; say so honestly.
 - Never invent facts, URLs, numbers or search results. Use only what tool observations returned, and cite the URLs you actually opened.
 - If a tool fails or returns poor results, try a different query, URL or tool before giving up.
 - To create a file use FILE_WRITE with a relative path (e.g. report.md, data.csv). For long content write in chunks with append=true. Mention the file path in your result.

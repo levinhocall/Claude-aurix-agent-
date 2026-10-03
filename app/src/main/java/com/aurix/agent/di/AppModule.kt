@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.aurix.agent.core.mission.AppDatabase
 import com.aurix.agent.core.mission.MissionDao
 import com.aurix.agent.core.tools.CalculatorTool
+import com.aurix.agent.core.tools.device.DeviceTools
 import com.aurix.agent.core.tools.FileEditTool
 import com.aurix.agent.core.tools.FileListTool
 import com.aurix.agent.core.tools.FileReadTool
@@ -52,11 +53,11 @@ object AppModule {
     fun provideScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     @Provides @Singleton
-    fun provideToolRegistry(search: SearchManager, fetcher: SafeFetcher, ws: Workspace): ToolRegistry = ToolRegistry(
+    fun provideToolRegistry(@ApplicationContext ctx: Context, search: SearchManager, fetcher: SafeFetcher, ws: Workspace): ToolRegistry = ToolRegistry(
         listOf(
             WebSearchTool(search), WebBrowserTool(fetcher),
             FileWriteTool(ws), FileReadTool(ws), FileEditTool(ws), FileListTool(ws),
             CalculatorTool(),
-        )
+        ) + DeviceTools.all(ctx)
     )
 }

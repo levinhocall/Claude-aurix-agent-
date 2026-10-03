@@ -36,5 +36,7 @@ interface MissionDao {
 
     @Query("SELECT * FROM mission_events WHERE missionId = :id ORDER BY id ASC") fun observeEventsAsc(id: String): Flow<List<EventEntity>>
     @Query("SELECT * FROM tool_calls WHERE missionId = :id ORDER BY id ASC") fun observeToolCallsAsc(id: String): Flow<List<ToolCallEntity>>
-    @Query("SELECT * FROM missions WHERE status IN ('CREATED','PLANNING','RUNNING','WAITING_FOR_TOOL','RECOVERING')") suspend fun getActiveMissions(): List<MissionEntity>
+    @Query("SELECT * FROM missions WHERE status IN ('CREATED','PLANNING','RUNNING','WAITING_FOR_TOOL','WAITING_FOR_APPROVAL','RECOVERING')") suspend fun getActiveMissions(): List<MissionEntity>
+
+    @Query("SELECT * FROM mission_events WHERE missionId = :id AND type LIKE 'APPROVAL_%' ORDER BY id ASC") suspend fun getApprovalEvents(id: String): List<EventEntity>
 }

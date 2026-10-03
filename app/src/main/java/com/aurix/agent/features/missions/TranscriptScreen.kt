@@ -165,6 +165,20 @@ private fun RenderItem(item: TItem, vm: TranscriptViewModel, ctx: android.conten
         is ErrorMsg -> Surface(shape = RoundedCornerShape(10.dp), color = AurixRedBg) {
             Text(item.text, color = cs.error, modifier = Modifier.padding(12.dp), fontFamily = Mono, fontSize = 12.sp)
         }
+        is ApprovalCard -> Surface(
+            shape = RoundedCornerShape(14.dp), color = cs.surfaceVariant, border = androidx.compose.foundation.BorderStroke(1.dp, cs.tertiary),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("⚠  Approval needed", style = MaterialTheme.typography.titleSmall, color = cs.tertiary)
+                Text(item.summary, fontFamily = Mono, fontSize = 13.sp)
+                if (item.reason.isNotBlank()) Text(item.reason, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { vm.decide(item.approvalKey, false) }, modifier = Modifier.weight(1f)) { Text("Deny") }
+                    Button(onClick = { vm.decide(item.approvalKey, true) }, modifier = Modifier.weight(1f)) { Text("Allow") }
+                }
+            }
+        }
         is FilesBlock -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Files", style = MaterialTheme.typography.titleSmall, color = cs.primary)
             item.files.forEach { f ->

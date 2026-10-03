@@ -1,5 +1,8 @@
 package com.aurix.agent.core.agent
 
+import com.aurix.agent.core.approval.ApprovalManager
+import com.aurix.agent.core.approval.Decision
+import com.aurix.agent.core.background.MissionNotifier
 import com.aurix.agent.core.ai.AiError
 import com.aurix.agent.core.ai.AiErrorType
 import com.aurix.agent.core.ai.AiMessage
@@ -35,6 +38,8 @@ class AgentRuntime @Inject constructor(
     private val registry: ToolRegistry,
     private val tools: ToolExecutor,
     private val workspace: Workspace,
+    private val approvals: ApprovalManager,
+    private val notifier: MissionNotifier,
 ) {
     private val limits = AgentLimits()
     private val stopRequests = ConcurrentHashMap<String, MissionStatus>()
@@ -76,7 +81,7 @@ class AgentRuntime @Inject constructor(
             }
             throw e
         } catch (e: StopMission) {
-            end(missionId, e.status, "Failed", e.message)
+            end(missionId, e.status, if (e.status == MissionStatus.PAUSED) "Paused" else "Failed", e.message)
         } catch (e: AiError) {
             val userFixable = e.type == AiErrorType.AUTH_ERROR || e.type == AiErrorType.NETWORK_ERROR ||
                 e.type == AiErrorType.RATE_LIMIT || e.type == AiErrorType.TIMEOUT || e.type == AiErrorType.BUDGET_EXCEEDED
@@ -162,8 +167,22 @@ class AgentRuntime @Inject constructor(
                     recover(r, steps, step, attempt, "Loop detected: identical tool call repeated")
                     return
                 }
+                val tool = registry.get(name)
+                var approved = tool == null || tool.risk != com.aurix.agent.core.tools.RiskLevel.HIGH
+                if (tool != null && approvals.needsApproval(tool)) {
+                    r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_APPROVAL, currentAction = "Waiting for your approval: $name"))
+                    notifier.approvalNeeded(r.m, tool.describe(input))
+                    val decision = approvals.request(id, tool, name, input, say)
+                    r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = step.title))
+                    if (decision == Decision.TIMED_OUT) throw StopMission(MissionStatus.PAUSED, "Approval timed out. Tap Resume to ask again.")
+                    if (decision == Decision.DENIED) {
+                        scratch.append("\n[#").append(calls).append(' ').append(name).append("] -> ERROR PERMISSION_REQUIRED\nThe user DENIED this action. Do not retry it; use another approach or finish with status blocked.\n")
+                        continue
+                    }
+                    approved = true
+                }
                 r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_TOOL, currentAction = "Using $name"))
-                val res = tools.execute(id, step.idx, name, input)
+                val res = tools.execute(id, step.idx, name, input, approved)
                 r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = step.title))
                 scratch.append("\n[#").append(calls).append(' ').append(name).append(' ').append(input.toString().take(300)).append("] -> ")
                 scratch.append(if (res.ok) "OK\n" else "ERROR ${res.errorType}\n").append(res.output.take(3000)).append('\n')

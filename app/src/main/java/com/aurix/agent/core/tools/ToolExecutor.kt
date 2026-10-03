@@ -22,10 +22,10 @@ class ToolExecutor @Inject constructor(
     private val events: AgentEvents,
     private val workspace: Workspace,
 ) {
-    suspend fun execute(missionId: String, stepIdx: Int, name: String, input: JSONObject): ToolResult {
+    suspend fun execute(missionId: String, stepIdx: Int, name: String, input: JSONObject, approved: Boolean = false): ToolResult {
         val started = System.currentTimeMillis()
         events.emit(missionId, AgentEventType.TOOL_STARTED, "$name ${input.toString().take(200)}")
-        val result = run(missionId, name, input)
+        val result = run(missionId, name, input, approved)
         val dur = System.currentTimeMillis() - started
         dao.insertToolCall(
             ToolCallEntity(
@@ -38,12 +38,12 @@ class ToolExecutor @Inject constructor(
         return result
     }
 
-    private suspend fun run(missionId: String, name: String, input: JSONObject): ToolResult {
+    private suspend fun run(missionId: String, name: String, input: JSONObject, approved: Boolean): ToolResult {
         val tool = registry.get(name)
             ?: return ToolResult.fail(ToolErrorType.INVALID_INPUT, "Unknown tool '$name'. Available: ${registry.names()}")
         val missing = tool.required.filter { !input.has(it) || input.isNull(it) }
         if (missing.isNotEmpty()) return ToolResult.fail(ToolErrorType.INVALID_INPUT, "Missing input field(s): ${missing.joinToString()}")
-        if (tool.risk == RiskLevel.HIGH) return ToolResult.fail(ToolErrorType.PERMISSION_REQUIRED, "This action needs user approval (approval system arrives in Phase 5)")
+        if (tool.risk == RiskLevel.HIGH && !approved) return ToolResult.fail(ToolErrorType.PERMISSION_REQUIRED, "This action needs user approval")
 
         var attempt = 0
         while (true) {

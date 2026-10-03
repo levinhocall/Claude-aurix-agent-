@@ -1,5 +1,12 @@
 package com.aurix.agent.features.settings
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,7 +39,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurix.agent.core.ai.routing.ProviderEntry
@@ -79,6 +90,7 @@ fun SettingsScreen(onBack: () -> Unit, vm: SettingsViewModel = hiltViewModel()) 
             }
             item { message?.let { Text(it, color = cs.tertiary, style = MaterialTheme.typography.bodySmall) } }
             items(ui.providers, key = { it.id }) { p -> ProviderBlock(p, status, vm) }
+            item { ApprovalAndPermissions(ui.strictApprovals) { vm.setStrict(it) } }
             item { TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Advanced ▾" else "Advanced ▸") } }
             if (advanced) {
                 item {
@@ -124,6 +136,49 @@ private fun ProviderBlock(p: ProviderEntry, status: Map<String, String>, vm: Set
                 }
             }
             OutlinedButton(onClick = { vm.recheck(p.id) }) { Text("Re-check models") }
+        }
+    }
+}
+
+
+private data class Perm(val label: String, val permission: String, val why: String)
+
+private val PERMS = listOf(
+    Perm("Send SMS", Manifest.permission.SEND_SMS, "to send texts you ask for (always asks approval)"),
+    Perm("Phone calls", Manifest.permission.CALL_PHONE, "to place calls you ask for (always asks approval)"),
+    Perm("Contacts", Manifest.permission.READ_CONTACTS, "to find a number by name"),
+    Perm("Location", Manifest.permission.ACCESS_FINE_LOCATION, "to tell you where you are / navigate"),
+)
+
+@Composable
+private fun ApprovalAndPermissions(strict: Boolean, onStrict: (Boolean) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val ctx = LocalContext.current
+    var tick by remember { mutableStateOf(0) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { tick++ }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { tick++ }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Approvals & phone permissions", style = MaterialTheme.typography.titleSmall, color = cs.primary)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Switch(checked = strict, onCheckedChange = onStrict)
+            Text("Strict: ask before every phone action (otherwise only SMS, calls and other sensitive actions ask)", style = MaterialTheme.typography.bodySmall)
+        }
+        PERMS.forEach { p ->
+            val granted = remember(tick) { ContextCompat.checkSelfPermission(ctx, p.permission) == PackageManager.PERMISSION_GRANTED }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { Text(p.label); Text(p.why, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) }
+                if (granted) Text("✓ granted", color = cs.primary) else OutlinedButton(onClick = { launcher.launch(p.permission) }) { Text("Grant") }
+            }
+        }
+        val overlay = remember(tick) { Settings.canDrawOverlays(ctx) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Display over other apps")
+                Text("lets AURIX open apps while it works in the background", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            }
+            if (overlay) Text("✓ granted", color = cs.primary) else OutlinedButton(onClick = {
+                ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName)))
+            }) { Text("Open") }
         }
     }
 }

@@ -9,7 +9,7 @@ enum class MissionStatus {
     CREATED, PLANNING, RUNNING, WAITING_FOR_TOOL, WAITING_FOR_APPROVAL, RECOVERING, PAUSED, COMPLETED, FAILED, CANCELLED;
 
     fun isTerminal() = this == COMPLETED || this == FAILED || this == CANCELLED
-    fun isActive() = this == CREATED || this == PLANNING || this == RUNNING || this == WAITING_FOR_TOOL || this == RECOVERING
+    fun isActive() = this == CREATED || this == PLANNING || this == RUNNING || this == WAITING_FOR_TOOL || this == WAITING_FOR_APPROVAL || this == RECOVERING
 }
 
 enum class StepStatus { PENDING, RUNNING, DONE, FAILED, SKIPPED }

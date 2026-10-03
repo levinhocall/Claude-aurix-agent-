@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aurix.agent.core.agent.MissionManager
+import com.aurix.agent.core.approval.ApprovalManager
 import com.aurix.agent.core.ai.routing.ProviderStore
 import com.aurix.agent.core.mission.MissionDao
 import com.aurix.agent.core.mission.MissionEntity
@@ -45,6 +46,7 @@ class TranscriptViewModel @Inject constructor(
     dao: MissionDao,
     private val manager: MissionManager,
     private val workspace: Workspace,
+    private val approvals: ApprovalManager,
 ) : ViewModel() {
     private val id: String = checkNotNull(savedState["id"])
 
@@ -54,6 +56,7 @@ class TranscriptViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DetailState())
 
     fun fileFor(path: String): File = workspace.resolve(id, path)
+    fun decide(key: String, allow: Boolean) { viewModelScope.launch { approvals.resolve(id, key, allow) } }
     fun pause() = manager.pause(id)
     fun resume() = manager.resume(id)
     fun cancel() = manager.cancel(id)

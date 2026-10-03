@@ -25,6 +25,7 @@ class MissionNotifier @Inject constructor(@ApplicationContext private val ctx: C
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CH_RUN, "Running missions", NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(CH_DONE, "Mission results", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(CH_APPROVAL, "Approval requests", NotificationManager.IMPORTANCE_HIGH))
     }
 
     private fun openIntent(missionId: String): PendingIntent {
@@ -63,8 +64,22 @@ class MissionNotifier @Inject constructor(@ApplicationContext private val ctx: C
         try { NotificationManagerCompat.from(ctx).notify(m.id.hashCode() + 1, n) } catch (e: SecurityException) { /* notifications not allowed */ }
     }
 
+    @SuppressLint("MissingPermission")
+    fun approvalNeeded(m: MissionEntity, summary: String) {
+        ensureChannels()
+        val n = NotificationCompat.Builder(ctx, CH_APPROVAL)
+            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setContentTitle("AURIX needs your approval")
+            .setContentText(summary.take(120))
+            .setAutoCancel(true)
+            .setContentIntent(openIntent(m.id))
+            .build()
+        try { NotificationManagerCompat.from(ctx).notify(m.id.hashCode() + 2, n) } catch (e: SecurityException) { }
+    }
+
     private companion object {
         const val CH_RUN = "missions_running"
         const val CH_DONE = "missions_done"
+        const val CH_APPROVAL = "approvals"
     }
 }

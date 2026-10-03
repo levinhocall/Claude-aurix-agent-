@@ -6,6 +6,7 @@ import com.aurix.agent.core.mission.MissionFileEntity
 import com.aurix.agent.core.mission.MissionStatus
 import com.aurix.agent.core.mission.StepEntity
 import com.aurix.agent.core.mission.ToolCallEntity
+import org.json.JSONObject
 
 sealed interface TItem { val key: String }
 data class UserMsg(val text: String) : TItem { override val key = "user" }
@@ -16,6 +17,7 @@ data class ToolRow(val call: ToolCallEntity) : TItem { override val key = "t-${c
 data class LiveRow(val text: String, val tool: Boolean) : TItem { override val key = "live" }
 data class ResultMsg(val text: String) : TItem { override val key = "result" }
 data class ErrorMsg(val text: String) : TItem { override val key = "error" }
+data class ApprovalCard(val approvalKey: String, val tool: String, val summary: String, val reason: String) : TItem { override val key = "approval-$approvalKey" }
 data class FilesBlock(val files: List<MissionFileEntity>) : TItem { override val key = "files" }
 
 data class DetailState(val mission: MissionEntity? = null, val items: List<TItem> = emptyList(), val model: String? = null)
@@ -25,8 +27,17 @@ fun buildDetailState(
 ): DetailState {
     if (m == null) return DetailState()
     val timed = mutableListOf<Pair<Long, TItem>>()
+    val requests = LinkedHashMap<String, JSONObject>()
+    val decided = HashSet<String>()
     for (e in events) {
         when (e.type) {
+            "APPROVAL_REQUESTED" -> try { val j = JSONObject(e.detail); requests[j.optString("key")] = j } catch (ex: Exception) { }
+            "APPROVAL_GRANTED", "APPROVAL_DENIED" -> {
+                val k = e.detail.substringBefore('|')
+                decided += k
+                val summary = requests[k]?.optString("summary").orEmpty()
+                timed += e.ts to Info(e.id, (if (e.type == "APPROVAL_GRANTED") "✓ Allowed: " else "✗ Denied: ") + summary, e.type == "APPROVAL_DENIED")
+            }
             "ASSISTANT_NOTE" -> timed += e.ts to Note(e.id, e.detail)
             "RECOVERY_STARTED" -> timed += e.ts to Info(e.id, "↻ " + e.detail, true)
             "PLAN_REVISED" -> timed += e.ts to Info(e.id, "⟳ Plan revised (${e.detail})", false)
@@ -40,11 +51,13 @@ fun buildDetailState(
     val out = mutableListOf<TItem>(UserMsg(m.objective))
     if (steps.isNotEmpty()) out += PlanCard(steps)
     out += timed.map { it.second }
+    requests.filterKeys { it !in decided }.forEach { (k, j) -> out += ApprovalCard(k, j.optString("tool"), j.optString("summary"), j.optString("reason")) }
     when (m.status) {
         MissionStatus.PLANNING, MissionStatus.CREATED -> out += LiveRow(if (m.status == MissionStatus.CREATED) m.currentAction.ifBlank { "Queued" } else "Planning…", false)
         MissionStatus.WAITING_FOR_TOOL -> out += LiveRow(m.currentAction, true)
         MissionStatus.RUNNING -> out += LiveRow(m.currentAction.ifBlank { "Working…" }, false)
         MissionStatus.RECOVERING -> out += LiveRow("Recovering…", false)
+        MissionStatus.WAITING_FOR_APPROVAL -> {}
         else -> {}
     }
     if (!m.finalResult.isNullOrBlank()) out += ResultMsg(m.finalResult)

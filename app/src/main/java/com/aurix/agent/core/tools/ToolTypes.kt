@@ -39,5 +39,7 @@ interface Tool {
     val risk: RiskLevel
     val timeoutMs: Long
     val retry: RetryPolicy get() = RetryPolicy()
+    /** Human-readable description shown in the approval card. */
+    fun describe(input: JSONObject): String = name + " " + input.toString().take(160)
     suspend fun execute(input: JSONObject, ctx: ToolContext): ToolResult
 }

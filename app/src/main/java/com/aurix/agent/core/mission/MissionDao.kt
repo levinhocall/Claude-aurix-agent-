@@ -33,4 +33,8 @@ interface MissionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertFile(f: MissionFileEntity)
     @Query("SELECT * FROM mission_files WHERE missionId = :id ORDER BY createdAt") fun observeFiles(id: String): Flow<List<MissionFileEntity>>
     @Query("SELECT * FROM mission_files WHERE missionId = :id ORDER BY createdAt") suspend fun getFiles(id: String): List<MissionFileEntity>
+
+    @Query("SELECT * FROM mission_events WHERE missionId = :id ORDER BY id ASC") fun observeEventsAsc(id: String): Flow<List<EventEntity>>
+    @Query("SELECT * FROM tool_calls WHERE missionId = :id ORDER BY id ASC") fun observeToolCallsAsc(id: String): Flow<List<ToolCallEntity>>
+    @Query("SELECT * FROM missions WHERE status IN ('CREATED','PLANNING','RUNNING','WAITING_FOR_TOOL','RECOVERING')") suspend fun getActiveMissions(): List<MissionEntity>
 }

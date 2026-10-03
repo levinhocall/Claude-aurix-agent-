@@ -4,24 +4,35 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aurix.agent.core.agent.MissionManager
-import com.aurix.agent.core.mission.EventEntity
+import com.aurix.agent.core.ai.routing.ProviderStore
 import com.aurix.agent.core.mission.MissionDao
 import com.aurix.agent.core.mission.MissionEntity
-import com.aurix.agent.core.mission.MissionFileEntity
 import com.aurix.agent.core.tools.Workspace
-import java.io.File
-import com.aurix.agent.core.mission.StepEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 @HiltViewModel
-class HomeViewModel @Inject constructor(dao: MissionDao, private val manager: MissionManager) : ViewModel() {
+class HomeViewModel @Inject constructor(
+    dao: MissionDao,
+    private val manager: MissionManager,
+    private val store: ProviderStore,
+) : ViewModel() {
     val missions: StateFlow<List<MissionEntity>> =
         dao.observeMissions().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _hasKey = MutableStateFlow(true)
+    val hasKey: StateFlow<Boolean> = _hasKey.asStateFlow()
+
+    fun refreshKey() { viewModelScope.launch(Dispatchers.IO) { _hasKey.value = store.providers().any { it.keys.isNotEmpty() } } }
 
     fun submit(objective: String, onCreated: (String) -> Unit) {
         viewModelScope.launch { onCreated(manager.create(objective.trim())) }
@@ -29,20 +40,20 @@ class HomeViewModel @Inject constructor(dao: MissionDao, private val manager: Mi
 }
 
 @HiltViewModel
-class DetailViewModel @Inject constructor(
+class TranscriptViewModel @Inject constructor(
     savedState: SavedStateHandle,
     dao: MissionDao,
     private val manager: MissionManager,
     private val workspace: Workspace,
 ) : ViewModel() {
     private val id: String = checkNotNull(savedState["id"])
-    val mission: StateFlow<MissionEntity?> = dao.observeMission(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-    val steps: StateFlow<List<StepEntity>> = dao.observeSteps(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val events: StateFlow<List<EventEntity>> = dao.observeEvents(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val files: StateFlow<List<MissionFileEntity>> = dao.observeFiles(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val state: StateFlow<DetailState> = combine(
+        dao.observeMission(id), dao.observeSteps(id), dao.observeEventsAsc(id), dao.observeToolCallsAsc(id), dao.observeFiles(id),
+    ) { m, steps, events, calls, files -> buildDetailState(m, steps, events, calls, files) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DetailState())
+
     fun fileFor(path: String): File = workspace.resolve(id, path)
-
     fun pause() = manager.pause(id)
     fun resume() = manager.resume(id)
     fun cancel() = manager.cancel(id)

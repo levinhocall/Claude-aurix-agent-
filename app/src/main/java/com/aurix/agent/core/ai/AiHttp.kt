@@ -48,3 +48,23 @@ internal suspend fun OkHttpClient.postJson(url: String, headers: Map<String, Str
         try { JSONObject(body) } catch (e: JSONException) { throw AiError(AiErrorType.MODEL_ERROR, "Provider returned a non-JSON response") }
     }
 }
+
+internal suspend fun OkHttpClient.getJson(url: String, headers: Map<String, String>, secret: String): JSONObject {
+    val req = try {
+        Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.get().build()
+    } catch (e: IllegalArgumentException) {
+        throw AiError(AiErrorType.INVALID_INPUT, "Invalid base URL")
+    }
+    val resp = try {
+        newCall(req).awaitResponse()
+    } catch (e: SocketTimeoutException) {
+        throw AiError(AiErrorType.TIMEOUT, "Request timed out")
+    } catch (e: IOException) {
+        throw AiError(AiErrorType.NETWORK_ERROR, "Network error (${e.javaClass.simpleName})")
+    }
+    return resp.use { r ->
+        val body = r.body?.string().orEmpty()
+        if (!r.isSuccessful) throw mapHttpError(r.code, r.header("Retry-After"), body, secret)
+        try { JSONObject(body) } catch (e: JSONException) { throw AiError(AiErrorType.MODEL_ERROR, "Provider returned a non-JSON response") }
+    }
+}

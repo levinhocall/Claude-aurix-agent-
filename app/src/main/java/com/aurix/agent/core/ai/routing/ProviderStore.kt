@@ -26,7 +26,7 @@ class ProviderStore @Inject constructor(private val secure: SecureSettings) {
 
     fun policy(): RoutingPolicy {
         policyCache?.let { return it }
-        val p = try { RoutingPolicy.valueOf(secure.getString(K_POLICY) ?: "") } catch (e: Exception) { RoutingPolicy.BALANCED }
+        val p = try { RoutingPolicy.valueOf(secure.getString(K_POLICY) ?: "") } catch (e: Exception) { RoutingPolicy.QUALITY }
         policyCache = p
         return p
     }

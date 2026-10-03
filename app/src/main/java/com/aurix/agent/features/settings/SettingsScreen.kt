@@ -15,12 +15,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,7 +35,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aurix.agent.core.ai.routing.Presets
 import com.aurix.agent.core.ai.routing.ProviderEntry
 import com.aurix.agent.core.ai.routing.RoutingPolicy
 import kotlinx.coroutines.delay
@@ -46,28 +45,62 @@ fun SettingsScreen(onBack: () -> Unit, vm: SettingsViewModel = hiltViewModel()) 
     val ui by vm.ui.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
+    var key by remember { mutableStateOf("") }
+    var custom by remember { mutableStateOf("") }
+    var advanced by remember { mutableStateOf(false) }
+    var budget by remember(ui.dailyBudget) { mutableStateOf(if (ui.dailyBudget == 0L) "" else ui.dailyBudget.toString()) }
     LaunchedEffect(Unit) { while (true) { vm.refreshStatus(); delay(2_000) } }
+    val cs = MaterialTheme.colorScheme
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Settings") }, navigationIcon = { TextButton(onClick = onBack) { Text("Back") } }) }) { pad ->
-        LazyColumn(
-            modifier = Modifier.padding(pad).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item { RoutingSection(ui, vm) }
-            item { message?.let { Text(it, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.bodySmall) } }
-            items(ui.providers, key = { it.id }) { p -> ProviderCard(p, status, vm) }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("API keys") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("‹", color = cs.onBackground) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background),
+            )
+        },
+    ) { pad ->
+        LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Add provider", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                    Presets.all.chunked(3).forEach { row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            row.forEach { pr -> OutlinedButton(onClick = { vm.addPreset(pr) }, modifier = Modifier.weight(1f)) { Text(pr.name, maxLines = 1) } }
-                        }
-                    }
-                    Text(
-                        "Keys are stored encrypted (Android Keystore) and never shown again. Model names are editable — use Test to check them.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Text(
+                    "Paste a key from OpenAI, Anthropic, Gemini, Groq, OpenRouter or xAI. AURIX detects the provider, checks the key and picks the best available model automatically.",
+                    style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
+                )
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        key, { key = it }, singleLine = true, modifier = Modifier.weight(1f),
+                        label = { Text("Paste API key") }, visualTransformation = PasswordVisualTransformation(),
                     )
+                    Button(onClick = { vm.addKey(key, custom); key = "" }, enabled = key.isNotBlank() && !ui.busy) { Text(if (ui.busy) "…" else "Add") }
+                }
+            }
+            item { message?.let { Text(it, color = cs.tertiary, style = MaterialTheme.typography.bodySmall) } }
+            items(ui.providers, key = { it.id }) { p -> ProviderBlock(p, status, vm) }
+            item { TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Advanced ▾" else "Advanced ▸") } }
+            if (advanced) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            custom, { custom = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Custom base URL (only for other OpenAI-compatible providers)") },
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Switch(checked = ui.policy == RoutingPolicy.BALANCED, onCheckedChange = { vm.setSaveCost(it) })
+                            Text("Save cost: use the faster model for simple steps", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                budget, { budget = it.filter { c -> c.isDigit() } }, singleLine = true, modifier = Modifier.weight(1f),
+                                label = { Text("Daily token budget (blank = unlimited)") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            )
+                            OutlinedButton(onClick = { vm.setBudget(budget.toLongOrNull() ?: 0L) }) { Text("Set") }
+                        }
+                        Text("Used today: ${ui.todayTokens} tokens", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    }
                 }
             }
         }
@@ -75,71 +108,22 @@ fun SettingsScreen(onBack: () -> Unit, vm: SettingsViewModel = hiltViewModel()) 
 }
 
 @Composable
-private fun RoutingSection(ui: SettingsState, vm: SettingsViewModel) {
-    var budget by remember(ui.dailyBudget) { mutableStateOf(if (ui.dailyBudget == 0L) "" else ui.dailyBudget.toString()) }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Model routing", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        RoutingPolicy.values().forEach { pol ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(selected = ui.policy == pol, onClick = { vm.setPolicy(pol) })
-                Column { Text(pol.label, fontWeight = FontWeight.Medium); Text(pol.hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                budget, { budget = it.filter { c -> c.isDigit() } }, singleLine = true, modifier = Modifier.weight(1f),
-                label = { Text("Daily token budget (blank = unlimited)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            )
-            Button(onClick = { vm.setBudget(budget.toLongOrNull() ?: 0L) }) { Text("Set") }
-        }
-        Text("Used today: ${ui.todayTokens} tokens", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun ProviderCard(p: ProviderEntry, status: Map<String, String>, vm: SettingsViewModel) {
-    var name by remember(p) { mutableStateOf(p.name) }
-    var url by remember(p) { mutableStateOf(p.baseUrl) }
-    var fast by remember(p) { mutableStateOf(p.fastModel) }
-    var strong by remember(p) { mutableStateOf(p.strongModel) }
-    var newKey by remember { mutableStateOf("") }
-
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("${p.name} · ${p.type.label}", fontWeight = FontWeight.Bold)
-                Switch(checked = p.enabled, onCheckedChange = { vm.updateProvider(p.copy(enabled = it)) })
-            }
-            OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(url, { url = it }, label = { Text("Base URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(fast, { fast = it }, label = { Text("Fast model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(strong, { strong = it }, label = { Text("Strong model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Switch(checked = p.independentKeys, onCheckedChange = { vm.updateProvider(p.copy(independentKeys = it)) })
-                Text("Keys are from separate accounts/projects (allows switching key on rate limit)", style = MaterialTheme.typography.bodySmall)
-            }
+private fun ProviderBlock(p: ProviderEntry, status: Map<String, String>, vm: SettingsViewModel) {
+    val cs = MaterialTheme.colorScheme
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(p.name, fontWeight = FontWeight.Bold)
+            Text("Auto-selected · best: ${p.strongModel} · fast: ${p.fastModel}", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             p.keys.forEach { k ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("${k.label}  ••••${k.secret.takeLast(4)}")
-                        Text(status[k.id].orEmpty(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(status[k.id].orEmpty(), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                     }
                     TextButton(onClick = { vm.removeKey(p.id, k.id) }) { Text("Remove") }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    newKey, { newKey = it }, singleLine = true, modifier = Modifier.weight(1f),
-                    label = { Text("Add API key") }, visualTransformation = PasswordVisualTransformation(),
-                )
-                Button(onClick = { vm.addKey(p.id, newKey); newKey = "" }, enabled = newKey.isNotBlank()) { Text("Add") }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { vm.updateProvider(p.copy(name = name.trim(), baseUrl = url.trim(), fastModel = fast.trim(), strongModel = strong.trim())) }) { Text("Save") }
-                OutlinedButton(onClick = { vm.test(p.id) }) { Text("Test") }
-                TextButton(onClick = { vm.deleteProvider(p.id) }) { Text("Delete") }
-            }
+            OutlinedButton(onClick = { vm.recheck(p.id) }) { Text("Re-check models") }
         }
     }
 }

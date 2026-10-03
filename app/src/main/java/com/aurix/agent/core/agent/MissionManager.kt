@@ -1,30 +1,41 @@
 package com.aurix.agent.core.agent
 
+import android.content.Context
+import androidx.work.BackoffPolicy
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
+import androidx.work.WorkManager
+import androidx.work.workDataOf
+import com.aurix.agent.core.background.MissionWorker
 import com.aurix.agent.core.mission.MissionDao
 import com.aurix.agent.core.mission.MissionEntity
 import com.aurix.agent.core.mission.MissionStatus
 import com.aurix.agent.di.ApplicationScope
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Owns running mission jobs. Phase 1 runs missions in the app process only:
- * if Android kills the process, state is safe in Room and the mission shows PAUSED (Resume).
- * Phase 4 moves execution into WorkManager / a foreground service.
+ * Mission -> persistent queue (WorkManager) -> MissionWorker -> AgentRuntime -> Room checkpoints -> resume.
+ * Missions need a network connection to start (queued otherwise); they survive UI close and process death.
  */
 @Singleton
 class MissionManager @Inject constructor(
     private val dao: MissionDao,
     private val runtime: AgentRuntime,
     private val events: AgentEvents,
+    @ApplicationContext private val context: Context,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
-    private val jobs = ConcurrentHashMap<String, Job>()
+    private fun wm() = WorkManager.getInstance(context)
+    private fun workName(id: String) = "mission-$id"
 
     suspend fun create(objective: String): String {
         val id = UUID.randomUUID().toString()
@@ -36,10 +47,13 @@ class MissionManager @Inject constructor(
     }
 
     fun start(id: String) {
-        if (jobs[id]?.isActive == true) return
-        val job = scope.launch { runtime.run(id) }
-        jobs[id] = job
-        job.invokeOnCompletion { jobs.remove(id, job) }
+        val req = OneTimeWorkRequestBuilder<MissionWorker>()
+            .setInputData(workDataOf(MissionWorker.KEY_ID to id))
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .build()
+        wm().enqueueUniqueWork(workName(id), ExistingWorkPolicy.KEEP, req)
     }
 
     fun resume(id: String) = start(id)
@@ -47,11 +61,11 @@ class MissionManager @Inject constructor(
     fun cancel(id: String) = stop(id, MissionStatus.CANCELLED)
 
     private fun stop(id: String, status: MissionStatus) {
-        val job = jobs[id]
-        if (job != null && job.isActive) {
-            runtime.requestStop(id, status)
-            job.cancel()
+        if (runtime.isRunning(id)) {
+            runtime.requestStop(id, status)   // runtime writes the final state when its coroutine is cancelled
+            wm().cancelUniqueWork(workName(id))
         } else {
+            wm().cancelUniqueWork(workName(id))
             scope.launch {
                 val m = dao.getMission(id) ?: return@launch
                 if (m.status.isTerminal()) return@launch
@@ -61,10 +75,8 @@ class MissionManager @Inject constructor(
         }
     }
 
-    /** Called once per process start: anything that was mid-run lost its executor, so say so honestly. */
+    /** Process start: re-attach any unfinished mission to the queue (KEEP = no duplicate if WorkManager already has it). */
     fun onAppStart() {
-        scope.launch {
-            dao.markInterrupted("Interrupted: app process was stopped. Tap Resume to continue.", System.currentTimeMillis())
-        }
+        scope.launch { dao.getActiveMissions().forEach { start(it.id) } }
     }
 }

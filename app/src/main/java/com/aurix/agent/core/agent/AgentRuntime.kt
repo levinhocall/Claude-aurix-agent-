@@ -38,6 +38,9 @@ class AgentRuntime @Inject constructor(
 ) {
     private val limits = AgentLimits()
     private val stopRequests = ConcurrentHashMap<String, MissionStatus>()
+    private val running: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    fun isRunning(id: String) = running.contains(id)
 
     fun requestStop(id: String, status: MissionStatus) { stopRequests[id] = status }
 
@@ -51,6 +54,11 @@ class AgentRuntime @Inject constructor(
     private class StopMission(val status: MissionStatus, message: String) : Exception(message)
 
     suspend fun run(missionId: String) {
+        if (!running.add(missionId)) return // already executing in this process
+        try { runGuarded(missionId) } finally { running.remove(missionId) }
+    }
+
+    private suspend fun runGuarded(missionId: String) {
         val loaded = dao.getMission(missionId) ?: return
         if (loaded.status.isTerminal()) return
         val wasPaused = loaded.status == MissionStatus.PAUSED
@@ -143,6 +151,8 @@ class AgentRuntime @Inject constructor(
                     recover(r, steps, step, attempt, "Too many tool calls without finishing the step")
                     return
                 }
+                val say = o.optString("say").trim()
+                if (say.isNotEmpty()) events.emit(id, AgentEventType.ASSISTANT_NOTE, say)
                 val name = o.optString("tool").trim()
                 val input = o.optJSONObject("input") ?: JSONObject()
                 val key = "$name|$input"
@@ -248,7 +258,7 @@ class AgentRuntime @Inject constructor(
         val resp = ai.complete(AiRequest(listOf(AiMessage("system", system), AiMessage("user", user)), maxTokens = maxTokens, purpose = purpose, escalate = escalate))
         val used = if (resp.usage.total > 0) resp.usage.total else (user.length + system.length + resp.text.length) / 4
         r.m = save(r.m.copy(iterations = r.m.iterations + 1, tokensUsed = r.m.tokensUsed + used))
-        events.emit(m.id, AgentEventType.MODEL_RESPONSE, "$purpose, ~$used tokens")
+        events.emit(m.id, AgentEventType.MODEL_RESPONSE, "$purpose, ~$used tokens, ${resp.model}")
         return resp.text
     }
 

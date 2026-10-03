@@ -29,8 +29,8 @@ class ToolExecutor @Inject constructor(
         val dur = System.currentTimeMillis() - started
         dao.insertToolCall(
             ToolCallEntity(
-                missionId = missionId, stepIdx = stepIdx, tool = name, input = input.toString().take(500),
-                ok = result.ok, errorType = result.errorType?.name, output = result.output.take(800), durationMs = dur, ts = started,
+                missionId = missionId, stepIdx = stepIdx, tool = name, input = input.toString().take(2000),
+                ok = result.ok, errorType = result.errorType?.name, output = result.output.take(1200), durationMs = dur, ts = started,
             )
         )
         val tail = if (result.ok) "" else " ${result.errorType}: ${result.output.take(150)}"

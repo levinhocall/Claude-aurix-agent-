@@ -9,7 +9,7 @@ Break the user's objective into 3-8 concrete, ordered steps that can be done wit
 Reply with JSON only: {"steps":["...","..."]}"""
 
     fun step(catalog: String) = """You execute ONE step of a plan for an autonomous agent. Work in a loop: each turn reply with JSON only, in exactly one of these forms.
-1) Use a tool: {"action":"tool","tool":"NAME","input":{...}}
+1) Use a tool: {"action":"tool","say":"<one short sentence: what you are doing and why>","tool":"NAME","input":{...}}
 2) Finish the step: {"action":"finish","status":"done" or "blocked","result":"<the step's actual output>"}
 
 Available tools:

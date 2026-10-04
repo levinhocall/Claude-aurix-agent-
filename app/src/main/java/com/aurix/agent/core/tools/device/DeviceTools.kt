@@ -29,6 +29,8 @@ import com.aurix.agent.core.tools.ToolContext
 import com.aurix.agent.core.tools.ToolErrorType
 import com.aurix.agent.core.tools.ToolException
 import com.aurix.agent.core.tools.ToolResult
+import com.aurix.agent.core.tools.screen.AurixAccessibilityService
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
@@ -43,6 +45,8 @@ private fun requirePermission(ctx: Context, permission: String, label: String) {
     if (ContextCompat.checkSelfPermission(ctx, permission) != PackageManager.PERMISSION_GRANTED)
         throw ToolException(ToolErrorType.PERMISSION_REQUIRED, "$label permission is not granted. Open AURIX → Settings → Phone permissions and grant it.")
 }
+
+fun openOtherApp(ctx: Context, intent: Intent) = startOtherApp(ctx, intent)
 
 private fun startOtherApp(ctx: Context, intent: Intent) {
     if (!AppState.inForeground && !Settings.canDrawOverlays(ctx))
@@ -105,24 +109,37 @@ class OpenUrlTool(private val ctx: Context) : Tool {
 
 class PlayMusicTool(private val ctx: Context) : Tool {
     override val name = "PLAY_MUSIC"
-    override val description = "Ask the phone's music app to search and play a song/artist. Falls back to a YouTube search. OK means the request was delivered, not that audio is playing."
+    override val description = "Play a song/artist. With screen control enabled it opens YouTube results and taps the first result so playback starts; otherwise asks the music app. OK = delivered, verify with SCREEN_READ."
     override val inputSchema = """{"query":"song or artist"}"""
-    override val outputSchema = "confirmation"
+    override val outputSchema = "result"
     override val required = listOf("query")
     override val risk = RiskLevel.MEDIUM
-    override val timeoutMs = 10_000L
+    override val timeoutMs = 40_000L
     override fun describe(input: JSONObject) = "Play music: ${input.optString("query")}"
 
     override suspend fun execute(input: JSONObject, ctx0: ToolContext): ToolResult {
         val q = input.optString("query").trim()
         if (q.isEmpty()) throw ToolException(ToolErrorType.INVALID_INPUT, "query is empty")
+        val svc = AurixAccessibilityService.instance
+        val yt = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(q)))
+        if (svc != null) {
+            startOtherApp(ctx, yt)
+            for (i in 0 until 18) {
+                delay(500)
+                if (!svc.foregroundPackage().contains("youtube", true)) continue
+                val hit = svc.findFirstWithDescription("play video") ?: continue
+                val msg = svc.clickNode(hit)
+                delay(1500)
+                return ToolResult.ok("Opened YouTube for \"$q\" and $msg. Playback should be starting. Screen:\n" + svc.snapshotText(15))
+            }
+            return ToolResult.ok("Opened YouTube results for \"$q\" but found no result to tap automatically. Screen:\n" + svc.snapshotText(25))
+        }
         val play = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
             .putExtra(SearchManager.QUERY, q)
             .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
-        if (tryStart(ctx, play)) return ToolResult.ok("Asked the music app to play \"$q\" (request delivered; playback not confirmed)")
-        val yt = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(q)))
+        if (tryStart(ctx, play)) return ToolResult.ok("Asked the music app to play \"$q\" (delivered; playback not confirmed). Enable Screen control in Settings for reliable auto-play.")
         startOtherApp(ctx, yt)
-        return ToolResult.ok("No music app handled it; opened a YouTube search for \"$q\" (user must tap a result)")
+        return ToolResult.ok("Opened a YouTube search for \"$q\"; the user must tap a result (enable Screen control to automate this)")
     }
 }
 
@@ -263,13 +280,13 @@ class ClipboardTool(private val ctx: Context) : Tool {
 class SendSmsTool(private val ctx: Context) : Tool {
     override val name = "SEND_SMS"
     override val description = "Send a text message (SMS) to a phone number. Always asks the user for approval first."
-    override val inputSchema = """{"number":"+919876543210","text":"message"}"""
+    override val inputSchema = """{"to":"contact name","number":"+919876543210","text":"message"}"""
     override val outputSchema = "confirmation"
     override val required = listOf("number", "text")
     override val permissions = listOf("android.permission.SEND_SMS")
     override val risk = RiskLevel.HIGH
     override val timeoutMs = 15_000L
-    override fun describe(input: JSONObject) = "Send SMS to ${input.optString("number")}: \"${input.optString("text").take(120)}\""
+    override fun describe(input: JSONObject) = "Send SMS to ${input.optString("to").ifBlank { "(unnamed)" }} (${input.optString("number")}): \"${input.optString("text").take(120)}\""
 
     @Suppress("DEPRECATION")
     override suspend fun execute(input: JSONObject, ctx0: ToolContext): ToolResult {
@@ -305,8 +322,8 @@ class CallPhoneTool(private val ctx: Context) : Tool {
 
 class LookupContactTool(private val ctx: Context) : Tool {
     override val name = "LOOKUP_CONTACT"
-    override val description = "Find phone numbers of saved contacts by name."
-    override val inputSchema = """{"name":"Rahul"}"""
+    override val description = "Find saved contacts by name (accent-insensitive). Says whether the match is EXACT; if not exact, do not guess: use ASK_USER."
+    override val inputSchema = """{"name":"Mom"}"""
     override val outputSchema = "matching contacts with numbers"
     override val required = listOf("name")
     override val permissions = listOf("android.permission.READ_CONTACTS")
@@ -318,13 +335,32 @@ class LookupContactTool(private val ctx: Context) : Tool {
         requirePermission(ctx, android.Manifest.permission.READ_CONTACTS, "Contacts")
         val q = input.optString("name").trim()
         if (q.isEmpty()) throw ToolException(ToolErrorType.INVALID_INPUT, "name is empty")
-        val rows = mutableListOf<String>()
+        val found = LinkedHashMap<String, Triple<String, String, Int>>() // number -> (name, number, score)
         ctx.contentResolver.query(
             ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
             arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
-            "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?", arrayOf("%$q%"), null,
-        )?.use { c -> while (c.moveToNext() && rows.size < 8) rows += "${c.getString(0)}: ${c.getString(1)}" }
-        return if (rows.isEmpty()) ToolResult.ok("No contact matches '$q'") else ToolResult.ok(rows.distinct().joinToString("\n"))
+            null, null, null,
+        )?.use { c ->
+            var n = 0
+            while (c.moveToNext() && n++ < 20_000) {
+                val name = c.getString(0).orEmpty(); val num = c.getString(1).orEmpty()
+                val sc = contactScore(name, q)
+                if (sc > 0) {
+                    val key = num.filter { it.isDigit() }.takeLast(10)
+                    val old = found[key]
+                    if (old == null || old.third < sc) found[key] = Triple(name, num, sc)
+                }
+            }
+        }
+        val ranked = found.values.sortedByDescending { it.third }.take(5)
+        if (ranked.isEmpty()) return ToolResult.ok("No contact matches '$q'")
+        val exact = ranked.filter { it.third == 100 }
+        val head = when {
+            exact.size == 1 -> "EXACT match:"
+            exact.size > 1 -> "Several EXACT matches (ask the user which):"
+            else -> "No exact match. Candidates (do NOT guess, use ASK_USER):"
+        }
+        return ToolResult.ok(head + "\n" + ranked.joinToString("\n") { "${it.first}: ${it.second}" })
     }
 }
 

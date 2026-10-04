@@ -18,6 +18,7 @@ data class LiveRow(val text: String, val tool: Boolean) : TItem { override val k
 data class ResultMsg(val text: String) : TItem { override val key = "result" }
 data class ErrorMsg(val text: String) : TItem { override val key = "error" }
 data class ApprovalCard(val approvalKey: String, val tool: String, val summary: String, val reason: String) : TItem { override val key = "approval-$approvalKey" }
+data class QuestionCard(val qkey: String, val question: String, val options: List<String>) : TItem { override val key = "question-$qkey" }
 data class FilesBlock(val files: List<MissionFileEntity>) : TItem { override val key = "files" }
 
 data class DetailState(val mission: MissionEntity? = null, val items: List<TItem> = emptyList(), val model: String? = null)
@@ -29,8 +30,12 @@ fun buildDetailState(
     val timed = mutableListOf<Pair<Long, TItem>>()
     val requests = LinkedHashMap<String, JSONObject>()
     val decided = HashSet<String>()
+    val questions = LinkedHashMap<String, JSONObject>()
+    val answered = HashSet<String>()
     for (e in events) {
         when (e.type) {
+            "QUESTION_ASKED" -> try { val j = JSONObject(e.detail); questions[j.optString("key")] = j } catch (ex: Exception) { }
+            "QUESTION_ANSWERED" -> { answered += e.detail.substringBefore('|'); timed += e.ts to Info(e.id, "↩ You: " + e.detail.substringAfter('|').take(120), false) }
             "APPROVAL_REQUESTED" -> try { val j = JSONObject(e.detail); requests[j.optString("key")] = j } catch (ex: Exception) { }
             "APPROVAL_GRANTED", "APPROVAL_DENIED" -> {
                 val k = e.detail.substringBefore('|')
@@ -51,6 +56,7 @@ fun buildDetailState(
     val out = mutableListOf<TItem>(UserMsg(m.objective))
     if (steps.isNotEmpty()) out += PlanCard(steps)
     out += timed.map { it.second }
+    questions.filterKeys { it !in answered }.forEach { (k, j) -> out += QuestionCard(k, j.optString("question"), j.optJSONArray("options")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()) }
     requests.filterKeys { it !in decided }.forEach { (k, j) -> out += ApprovalCard(k, j.optString("tool"), j.optString("summary"), j.optString("reason")) }
     when (m.status) {
         MissionStatus.PLANNING, MissionStatus.CREATED -> out += LiveRow(if (m.status == MissionStatus.CREATED) m.currentAction.ifBlank { "Queued" } else "Planning…", false)

@@ -97,7 +97,7 @@ class AgentRuntime @Inject constructor(
         r.m = save(r.m.copy(status = MissionStatus.PLANNING, currentAction = "Creating plan"))
         var titles: List<String>? = null
         for (attempt in 1..limits.maxPlanAttempts) {
-            titles = parseStepList(model(r, "plan", AgentPrompts.plan(registry.catalog()), "Objective: ${r.m.objective}", 1024))
+            titles = parseStepList(model(r, "plan", AgentPrompts.plan(registry.names()), "Objective: ${r.m.objective}", 1024))
             if (titles != null) break
             events.emit(r.m.id, AgentEventType.RECOVERY_STARTED, "Plan was not valid JSON (attempt $attempt)")
         }
@@ -130,14 +130,16 @@ class AgentRuntime @Inject constructor(
         events.emit(id, AgentEventType.STEP_STARTED, "${doneCount + 1}/${steps.size}: ${step.title}")
 
         val base = buildString {
-            append("Objective: ${r.m.objective}\n\nPlan:\n")
-            append(steps.joinToString("\n") { "${it.idx + 1}. ${it.title} [${it.status}]" })
-            append("\n\nCompleted so far:\n")
-            append(steps.filter { it.status == StepStatus.DONE }.joinToString("\n") { "- ${it.title}: ${it.result.orEmpty().take(1500)}" }.ifEmpty { "(nothing yet)" })
-            append("\n\nCurrent step: ${step.title}")
-            if (step.attempts > 0 && !step.result.isNullOrBlank()) append("\nPrevious attempt failed: ${step.result}")
+            append("Objective: ${r.m.objective}\n")
+            val done = steps.filter { it.status == StepStatus.DONE }
+            if (done.isNotEmpty()) append("Done:\n").append(done.joinToString("\n") { "- ${cleanTitle(it.title)}: ${it.result.orEmpty().take(900)}" }).append('\n')
+            val later = steps.filter { it.idx > step.idx && it.status == StepStatus.PENDING }
+            if (later.isNotEmpty()) append("Later steps: ").append(later.joinToString("; ") { cleanTitle(it.title).take(60) }).append('\n')
+            append("Current step: ${cleanTitle(step.title)}")
+            if (step.attempts > 0 && !step.result.isNullOrBlank()) append("\nPrevious attempt failed: ${step.result.take(300)}")
         }
-        val system = AgentPrompts.step(registry.catalog())
+        val shown = registry.expand(toolHints(step.title)).let { if (it.isEmpty()) it else it + "ASK_USER" }
+        val system = AgentPrompts.step(registry.catalog(if (shown.isEmpty()) null else shown), if (shown.isEmpty()) "" else registry.others(shown))
         val scratch = StringBuilder()
         val seen = HashMap<String, Int>()
         var calls = 0
@@ -168,8 +170,8 @@ class AgentRuntime @Inject constructor(
                     return
                 }
                 val tool = registry.get(name)
-                var approved = tool == null || tool.risk != com.aurix.agent.core.tools.RiskLevel.HIGH
-                if (tool != null && approvals.needsApproval(tool)) {
+                var approved = tool == null || tool.riskFor(input) != com.aurix.agent.core.tools.RiskLevel.HIGH
+                if (tool != null && approvals.needsApproval(tool, input)) {
                     r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_APPROVAL, currentAction = "Waiting for your approval: $name"))
                     notifier.approvalNeeded(r.m, tool.describe(input))
                     val decision = approvals.request(id, tool, name, input, say)
@@ -185,8 +187,8 @@ class AgentRuntime @Inject constructor(
                 val res = tools.execute(id, step.idx, name, input, approved)
                 r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = step.title))
                 scratch.append("\n[#").append(calls).append(' ').append(name).append(' ').append(input.toString().take(300)).append("] -> ")
-                scratch.append(if (res.ok) "OK\n" else "ERROR ${res.errorType}\n").append(res.output.take(3000)).append('\n')
-                if (scratch.length > 9000) scratch.delete(0, scratch.length - 9000)
+                scratch.append(if (res.ok) "OK\n" else "ERROR ${res.errorType}\n").append(res.output.take(1800)).append('\n')
+                if (scratch.length > 6000) scratch.delete(0, scratch.length - 6000)
                 continue
             }
             val result = o.optString("result")
@@ -227,7 +229,7 @@ class AgentRuntime @Inject constructor(
     private suspend fun replan(r: Run, steps: List<StepEntity>, failed: StepEntity, reason: String) {
         val id = r.m.id
         val done = steps.filter { it.status == StepStatus.DONE }.joinToString("\n") { "- ${it.title}: ${it.result.orEmpty().take(400)}" }.ifEmpty { "(nothing)" }
-        val raw = model(r, "replan", AgentPrompts.replan(registry.catalog()), "Objective: ${r.m.objective}\nCompleted:\n$done\nFailed step: ${failed.title}\nReason: $reason", 1024)
+        val raw = model(r, "replan", AgentPrompts.replan(registry.names()), "Objective: ${r.m.objective}\nCompleted:\n$done\nFailed step: ${failed.title}\nReason: $reason", 1024)
         val titles = parseStepList(raw) ?: throw StopMission(MissionStatus.FAILED, "INVALID_INPUT: could not revise the plan")
         dao.deleteUnfinishedSteps(id)
         val start = (dao.getSteps(id).maxOfOrNull { it.idx } ?: -1) + 1
@@ -240,6 +242,15 @@ class AgentRuntime @Inject constructor(
     /** Returns true when the mission is finished (COMPLETED), false when new gap-steps were queued. */
     private suspend fun verify(r: Run, steps: List<StepEntity>): Boolean {
         val id = r.m.id
+        // Tiny missions without files (e.g. a phone action): the last step result IS the answer; skipping the verifier saves a model call.
+        if (steps.size <= 3 && steps.none { it.status == StepStatus.FAILED } && dao.getFiles(id).isEmpty()) {
+            val last = steps.lastOrNull { it.status == StepStatus.DONE }?.result.orEmpty()
+            if (last.isNotBlank()) {
+                r.m = save(r.m.copy(finalResult = last))
+                end(id, MissionStatus.COMPLETED, "Completed", null)
+                return true
+            }
+        }
         r.m = save(r.m.copy(currentStep = steps.count { it.status == StepStatus.DONE }, currentAction = "Verifying result"))
         val results = steps.joinToString("\n") { "${it.idx + 1}. ${it.title} [${it.status}]: ${it.result.orEmpty().take(1500)}" }
         val files = dao.getFiles(id).joinToString("\n") { f ->

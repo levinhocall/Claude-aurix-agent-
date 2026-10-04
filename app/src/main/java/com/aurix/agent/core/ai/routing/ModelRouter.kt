@@ -7,7 +7,7 @@ object ModelRouter {
         RoutingPolicy.QUALITY -> ModelTier.STRONG
         RoutingPolicy.ECONOMY -> ModelTier.FAST
         RoutingPolicy.BALANCED -> when {
-            purpose == "test" -> ModelTier.FAST
+            (purpose == "test" || purpose == "plan") -> ModelTier.FAST
             purpose == "step" && !escalate -> ModelTier.FAST
             else -> ModelTier.STRONG
         }

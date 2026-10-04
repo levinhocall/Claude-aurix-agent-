@@ -25,7 +25,7 @@ import javax.inject.Inject
 
 data class SettingsState(
     val providers: List<ProviderEntry> = emptyList(),
-    val policy: RoutingPolicy = RoutingPolicy.QUALITY,
+    val policy: RoutingPolicy = RoutingPolicy.BALANCED,
     val dailyBudget: Long = 0,
     val todayTokens: Long = 0,
     val busy: Boolean = false,

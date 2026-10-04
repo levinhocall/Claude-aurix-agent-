@@ -39,6 +39,9 @@ interface Tool {
     val risk: RiskLevel
     val timeoutMs: Long
     val retry: RetryPolicy get() = RetryPolicy()
+    /** Risk can depend on the input (e.g. overwriting a file, acting inside a banking app). */
+    fun riskFor(input: JSONObject): RiskLevel = risk
+
     /** Human-readable description shown in the approval card. */
     fun describe(input: JSONObject): String = name + " " + input.toString().take(160)
     suspend fun execute(input: JSONObject, ctx: ToolContext): ToolResult

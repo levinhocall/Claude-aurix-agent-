@@ -14,7 +14,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "0.4.0-phase4"
+        versionName = "0.5.0-phase5"
     }
     buildTypes {
         release { isMinifyEnabled = false }
@@ -49,6 +49,8 @@ dependencies {
     ksp(libs.room.compiler)
     implementation(libs.okhttp)
     implementation(libs.jsoup)
+    implementation(libs.mlkit.text.latin)
+    implementation(libs.mlkit.text.devanagari)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)

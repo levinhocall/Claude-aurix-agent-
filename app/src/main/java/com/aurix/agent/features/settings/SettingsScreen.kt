@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,6 +48,8 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurix.agent.core.ai.routing.ProviderEntry
+import com.aurix.agent.core.tools.screen.AurixAccessibilityService
+import com.aurix.agent.core.tools.storage.storageAccessGranted
 import com.aurix.agent.core.ai.routing.RoutingPolicy
 import kotlinx.coroutines.delay
 
@@ -179,6 +182,28 @@ private fun ApprovalAndPermissions(strict: Boolean, onStrict: (Boolean) -> Unit)
             if (overlay) Text("✓ granted", color = cs.primary) else OutlinedButton(onClick = {
                 ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName)))
             }) { Text("Open") }
+        }
+        val a11y = remember(tick) { AurixAccessibilityService.enabledInSettings(ctx) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Screen control (Accessibility)")
+                Text(
+                    "lets AURIX read the screen and tap/type/scroll in other apps. If Android says 'Restricted setting': App info → ⋮ → Allow restricted settings, then enable AURIX here. Never works inside AURIX, banking/UPI/password apps need approval each time.",
+                    style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant,
+                )
+            }
+            if (a11y) Text("✓ on", color = cs.primary) else OutlinedButton(onClick = { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) { Text("Open") }
+        }
+        val files = remember(tick) { storageAccessGranted(ctx) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("All files access")
+                Text("lets AURIX list, search, zip, move and (after approval) delete files and photos", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            }
+            if (files) Text("✓ granted", color = cs.primary) else OutlinedButton(onClick = {
+                if (Build.VERSION.SDK_INT >= 30) ctx.startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:" + ctx.packageName)))
+                else launcher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }) { Text("Grant") }
         }
     }
 }

@@ -6,6 +6,17 @@ class ToolRegistry(tools: List<Tool>) {
     fun all(): List<Tool> = byName.values.toList()
     fun names(): String = byName.keys.joinToString(", ")
 
-    /** Compact catalog shown to the model. */
-    fun catalog(): String = all().joinToString("\n") { "- ${it.name} (risk ${it.risk}): ${it.description}\n  input: ${it.inputSchema}" }
+    private fun line(t: Tool) = "${t.name} ${t.inputSchema} - ${t.description.substringBefore(". ").take(110)}"
+
+    /** Compact catalog (one line per tool). `only` limits it to the tools a step actually needs, which saves tokens on every model call. */
+    fun catalog(only: Set<String>? = null): String = all().filter { only == null || it.name in only }.joinToString("\n") { line(it) }
+
+    fun others(shown: Set<String>): String = byName.keys.filter { it !in shown }.joinToString(", ")
+
+    /** Hinted tools plus their siblings (SCREEN_*, STORAGE_*), so multi-tool flows have everything they need. */
+    fun expand(names: Collection<String>): Set<String> {
+        val valid = names.filter { byName.containsKey(it) }.toSet()
+        val prefixes = valid.map { it.substringBefore('_') }.filter { it == "SCREEN" || it == "STORAGE" }.toSet()
+        return valid + byName.keys.filter { it.substringBefore('_') in prefixes }
+    }
 }

@@ -88,7 +88,8 @@ class FailoverTest {
         assertEquals("strong-a", ModelRouter.modelFor(p, RoutingPolicy.QUALITY, step))
         assertEquals("fast-a", ModelRouter.modelFor(p, RoutingPolicy.BALANCED, step))
         assertEquals("strong-a", ModelRouter.modelFor(p, RoutingPolicy.BALANCED, step.copy(escalate = true)))
-        assertEquals("strong-a", ModelRouter.modelFor(p, RoutingPolicy.BALANCED, AiRequest(emptyList(), purpose = "plan")))
+        assertEquals("fast-a", ModelRouter.modelFor(p, RoutingPolicy.BALANCED, AiRequest(emptyList(), purpose = "plan")))
+        assertEquals("strong-a", ModelRouter.modelFor(p, RoutingPolicy.BALANCED, AiRequest(emptyList(), purpose = "verify")))
         assertEquals("fast-a", ModelRouter.modelFor(p, RoutingPolicy.ECONOMY, AiRequest(emptyList(), purpose = "verify")))
     }
 

@@ -1,1 +1,4 @@
-<resources><string name="app_name">AURIX</string></resources>
+<resources>
+    <string name="app_name">AURIX</string>
+    <string name="accessibility_description">Lets AURIX read the screen and tap, type and scroll for you when you ask it to perform a task on your phone.</string>
+</resources>

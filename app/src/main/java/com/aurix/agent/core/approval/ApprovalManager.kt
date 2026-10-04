@@ -44,7 +44,7 @@ class ApprovalManager @Inject constructor(
 ) {
     private val waiters = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
 
-    fun needsApproval(tool: Tool): Boolean = needsApproval(tool.risk, settings.mode())
+    fun needsApproval(tool: Tool, input: JSONObject): Boolean = needsApproval(tool.riskFor(input), settings.mode())
 
     suspend fun request(missionId: String, tool: Tool, name: String, input: JSONObject, reason: String): Decision {
         val key = approvalKey(name, input)

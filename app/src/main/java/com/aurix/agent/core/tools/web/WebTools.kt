@@ -11,7 +11,7 @@ import org.jsoup.Jsoup
 class WebSearchTool(private val search: SearchManager) : Tool {
     override val name = "WEB_SEARCH"
     override val description = "Search the web. Returns titles, URLs and snippets. Use short, specific queries; try different wording if results are poor."
-    override val inputSchema = """{"query":"search terms","max_results":8}"""
+    override val inputSchema = """{"query":"search terms","max_results":6}"""
     override val outputSchema = "numbered list of results"
     override val required = listOf("query")
     override val permissions = listOf("network")
@@ -20,9 +20,9 @@ class WebSearchTool(private val search: SearchManager) : Tool {
     override val retry = RetryPolicy(maxAttempts = 2, backoffMs = 1_500)
 
     override suspend fun execute(input: JSONObject, ctx: ToolContext): ToolResult {
-        val max = input.optInt("max_results", 8).coerceIn(1, 15)
+        val max = input.optInt("max_results", 6).coerceIn(1, 15)
         val (provider, results) = search.search(input.optString("query").trim(), max)
-        val text = results.mapIndexed { i, r -> "${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet.take(250)}" }.joinToString("\n")
+        val text = results.mapIndexed { i, r -> "${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet.take(160)}" }.joinToString("\n")
         return ToolResult.ok("[via $provider]\n$text")
     }
 }
@@ -30,7 +30,7 @@ class WebSearchTool(private val search: SearchManager) : Tool {
 class WebBrowserTool(private val fetcher: SafeFetcher) : Tool {
     override val name = "WEB_BROWSER"
     override val description = "Open a web page and read its main text plus top links. Works for HTML, plain text and JSON pages. Does not run JavaScript."
-    override val inputSchema = """{"url":"https://...","max_chars":6000}"""
+    override val inputSchema = """{"url":"https://...","max_chars":3500}"""
     override val outputSchema = "title, text, links"
     override val required = listOf("url")
     override val permissions = listOf("network")
@@ -39,7 +39,7 @@ class WebBrowserTool(private val fetcher: SafeFetcher) : Tool {
     override val retry = RetryPolicy(maxAttempts = 2, backoffMs = 1_500)
 
     override suspend fun execute(input: JSONObject, ctx: ToolContext): ToolResult {
-        val max = input.optInt("max_chars", 6000).coerceIn(500, 12_000)
+        val max = input.optInt("max_chars", 3500).coerceIn(500, 12_000)
         val page = fetcher.get(input.optString("url").trim())
         if (!page.contentType.contains("html")) {
             val t = page.body

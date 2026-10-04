@@ -27,6 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -55,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurix.agent.core.agent.cleanTitle
 import com.aurix.agent.core.mission.MissionEntity
 import com.aurix.agent.core.mission.MissionStatus
 import com.aurix.agent.core.mission.StepStatus
@@ -69,7 +71,7 @@ private val Mono = FontFamily.Monospace
 private fun toolLabel(t: String) = when (t) {
     "WEB_SEARCH" -> "Search"; "WEB_BROWSER" -> "Fetch"; "FILE_WRITE" -> "Write"; "FILE_READ" -> "Read"
     "FILE_EDIT" -> "Update"; "FILE_LIST" -> "List"; "CALCULATOR" -> "Calc"
-    else -> t.lowercase().replaceFirstChar { it.uppercase() }
+    else -> t.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }
 }
 
 private fun inputJson(c: ToolCallEntity): JSONObject? = try { JSONObject(c.input) } catch (e: Exception) { null }
@@ -81,7 +83,8 @@ private fun argSummary(c: ToolCallEntity): String {
         "WEB_BROWSER" -> j?.optString("url")
         "CALCULATOR" -> j?.optString("expression")
         "FILE_WRITE", "FILE_READ", "FILE_EDIT" -> j?.optString("path")
-        else -> ""
+        else -> listOf("query", "name", "text", "key", "direction", "destination", "number", "question", "path", "paths", "from", "id", "url", "expression")
+            .firstNotNullOfOrNull { k -> j?.opt(k)?.toString()?.takeIf { it.isNotBlank() } }
     }
     return (v?.takeIf { it.isNotBlank() } ?: c.input.take(60)).take(70)
 }
@@ -179,6 +182,18 @@ private fun RenderItem(item: TItem, vm: TranscriptViewModel, ctx: android.conten
                 }
             }
         }
+        is QuestionCard -> Surface(
+            shape = RoundedCornerShape(14.dp), color = cs.surfaceVariant, border = androidx.compose.foundation.BorderStroke(1.dp, cs.primary),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            var answer by remember { mutableStateOf("") }
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("?  " + item.question, style = MaterialTheme.typography.bodyLarge)
+                item.options.forEach { o -> OutlinedButton(onClick = { vm.answer(item.qkey, o) }, modifier = Modifier.fillMaxWidth()) { Text(o) } }
+                OutlinedTextField(answer, { answer = it }, label = { Text("Your answer") }, modifier = Modifier.fillMaxWidth())
+                Button(onClick = { vm.answer(item.qkey, answer) }, enabled = answer.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Send") }
+            }
+        }
         is FilesBlock -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Files", style = MaterialTheme.typography.titleSmall, color = cs.primary)
             item.files.forEach { f ->
@@ -213,7 +228,7 @@ private fun PlanView(p: PlanCard) {
                     Text(glyph, color = color, fontFamily = Mono)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        s.title, style = MaterialTheme.typography.bodyMedium,
+                        cleanTitle(s.title), style = MaterialTheme.typography.bodyMedium,
                         color = if (s.status == StepStatus.DONE) cs.onSurfaceVariant else cs.onSurface,
                         textDecoration = if (s.status == StepStatus.DONE) TextDecoration.LineThrough else null,
                     )

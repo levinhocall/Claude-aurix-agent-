@@ -37,6 +37,9 @@ class ProviderStore @Inject constructor(private val secure: SecureSettings) {
 
     /** Models that hijack the JSON protocol with native tool calls (e.g. Groq gpt-oss / compound) are swapped for a safe one. */
     private fun fixKnownBad(p: ProviderEntry): ProviderEntry {
+        if (p.strongModel.endsWith(":batch") || p.fastModel.endsWith(":batch")) {
+            return fixKnownBad(p.copy(strongModel = p.strongModel.removeSuffix(":batch"), fastModel = p.fastModel.removeSuffix(":batch")))
+        }
         if (!p.baseUrl.contains("groq.com")) return p
         fun bad(m: String) = m.contains("gpt-oss") || m.contains("compound")
         val strong = if (bad(p.strongModel)) "llama-3.3-70b-versatile" else p.strongModel

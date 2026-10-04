@@ -30,6 +30,8 @@ data class SettingsState(
     val todayTokens: Long = 0,
     val busy: Boolean = false,
     val strictApprovals: Boolean = false,
+    val userName: String = "",
+    val wakeEnabled: Boolean = false,
 )
 
 @HiltViewModel
@@ -50,7 +52,7 @@ class SettingsViewModel @Inject constructor(
     init { viewModelScope.launch(Dispatchers.IO) { reload() } }
 
     private fun reload(busy: Boolean = _ui.value.busy) {
-        _ui.value = SettingsState(store.providers(), store.policy(), usage.budget(), usage.today(), busy, agentSettings.mode() == PermissionMode.STRICT)
+        _ui.value = SettingsState(store.providers(), store.policy(), usage.budget(), usage.today(), busy, agentSettings.mode() == PermissionMode.STRICT, agentSettings.userName(), agentSettings.wakeEnabled())
         refreshStatus()
     }
 
@@ -126,6 +128,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setStrict(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setMode(if (on) PermissionMode.STRICT else PermissionMode.STANDARD); reload() } }
+
+    fun setUserName(n: String) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setUserName(n); reload() } }
+    fun setWake(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setWakeEnabled(on); reload() } }
 
     fun setBudget(v: Long) { viewModelScope.launch(Dispatchers.IO) { usage.setBudget(v); reload() } }
 }

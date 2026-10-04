@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aurix.agent.core.agent.MissionManager
+import com.aurix.agent.core.approval.AgentSettings
 import com.aurix.agent.core.approval.ApprovalManager
 import com.aurix.agent.core.approval.QuestionManager
 import com.aurix.agent.core.ai.routing.ProviderStore
@@ -27,6 +28,7 @@ class HomeViewModel @Inject constructor(
     dao: MissionDao,
     private val manager: MissionManager,
     private val store: ProviderStore,
+    private val agentSettings: AgentSettings,
 ) : ViewModel() {
     val missions: StateFlow<List<MissionEntity>> =
         dao.observeMissions().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -34,7 +36,10 @@ class HomeViewModel @Inject constructor(
     private val _hasKey = MutableStateFlow(true)
     val hasKey: StateFlow<Boolean> = _hasKey.asStateFlow()
 
-    fun refreshKey() { viewModelScope.launch(Dispatchers.IO) { _hasKey.value = store.providers().any { it.keys.isNotEmpty() } } }
+    private val _userName = MutableStateFlow("")
+    val userName: StateFlow<String> = _userName.asStateFlow()
+
+    fun refreshKey() { viewModelScope.launch(Dispatchers.IO) { _hasKey.value = store.providers().any { it.keys.isNotEmpty() }; _userName.value = agentSettings.userName() } }
 
     fun submit(objective: String, onCreated: (String) -> Unit) {
         viewModelScope.launch { onCreated(manager.create(objective.trim())) }
@@ -58,6 +63,17 @@ class TranscriptViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DetailState())
 
     fun fileFor(path: String): File = workspace.resolve(id, path)
+
+    fun followUp(text: String, onCreated: (String) -> Unit) {
+        val m = state.value.mission
+        val ctx = m?.let { "Previous request: ${it.objective.take(120)}. Result: ${(it.finalResult ?: it.error ?: "").take(300)}" }
+        viewModelScope.launch { onCreated(manager.create(text.trim(), ctx)) }
+    }
+
+    fun retry(onCreated: (String) -> Unit) {
+        val m = state.value.mission ?: return
+        viewModelScope.launch { onCreated(manager.create(m.objective)) }
+    }
     fun answer(key: String, text: String) { viewModelScope.launch { questions.answer(id, key, text) } }
     fun decide(key: String, allow: Boolean) { viewModelScope.launch { approvals.resolve(id, key, allow) } }
     fun pause() = manager.pause(id)

@@ -14,16 +14,16 @@ import androidx.compose.ui.unit.sp
 
 private val Light = lightColorScheme(
     primary = Color(0xFFC96442), onPrimary = Color.White,
-    background = Color(0xFFFAF9F5), onBackground = Color(0xFF1F1E1D),
-    surface = Color(0xFFFAF9F5), onSurface = Color(0xFF1F1E1D),
-    surfaceVariant = Color(0xFFF0EEE6), onSurfaceVariant = Color(0xFF6B6A68),
-    outline = Color(0xFFD9D6CC), error = Color(0xFFB3261E), tertiary = Color(0xFFB7791F),
+    background = Color(0xFFF5F4EE), onBackground = Color(0xFF1F1E1D),
+    surface = Color(0xFFFFFFFF), onSurface = Color(0xFF1F1E1D),
+    surfaceVariant = Color(0xFFEDEBE2), onSurfaceVariant = Color(0xFF6B6A68),
+    outline = Color(0xFFDDDACE), error = Color(0xFFB3261E), tertiary = Color(0xFFB7791F),
 )
 private val Dark = darkColorScheme(
     primary = Color(0xFFD97757), onPrimary = Color(0xFF1F1E1D),
     background = Color(0xFF262624), onBackground = Color(0xFFF5F4EE),
-    surface = Color(0xFF262624), onSurface = Color(0xFFF5F4EE),
-    surfaceVariant = Color(0xFF30302E), onSurfaceVariant = Color(0xFFB5B3AB),
+    surface = Color(0xFF30302E), onSurface = Color(0xFFF5F4EE),
+    surfaceVariant = Color(0xFF3A3935), onSurfaceVariant = Color(0xFFB5B3AB),
     outline = Color(0xFF4A4945), error = Color(0xFFE5766C), tertiary = Color(0xFFE0A14A),
 )
 

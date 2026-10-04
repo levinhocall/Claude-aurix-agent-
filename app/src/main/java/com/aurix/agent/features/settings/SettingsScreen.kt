@@ -48,6 +48,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurix.agent.core.ai.routing.ProviderEntry
+import com.aurix.agent.core.voice.WakeWordService
 import com.aurix.agent.core.tools.screen.AurixAccessibilityService
 import com.aurix.agent.core.tools.storage.storageAccessGranted
 import com.aurix.agent.core.ai.routing.RoutingPolicy
@@ -93,6 +94,7 @@ fun SettingsScreen(onBack: () -> Unit, vm: SettingsViewModel = hiltViewModel()) 
             }
             item { message?.let { Text(it, color = cs.tertiary, style = MaterialTheme.typography.bodySmall) } }
             items(ui.providers, key = { it.id }) { p -> ProviderBlock(p, status, vm) }
+            item { VoiceSection(ui, vm) }
             item { ApprovalAndPermissions(ui.strictApprovals) { vm.setStrict(it) } }
             item { TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Advanced ▾" else "Advanced ▸") } }
             if (advanced) {
@@ -205,5 +207,42 @@ private fun ApprovalAndPermissions(strict: Boolean, onStrict: (Boolean) -> Unit)
                 else launcher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
             }) { Text("Grant") }
         }
+    }
+}
+
+
+@Composable
+private fun VoiceSection(ui: SettingsState, vm: SettingsViewModel) {
+    val cs = MaterialTheme.colorScheme
+    val ctx = LocalContext.current
+    var name by remember(ui.userName) { mutableStateOf(ui.userName) }
+    var tick by remember { mutableStateOf(0) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { tick++ }
+    val micGranted = remember(tick) { ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED }
+    fun startWake() {
+        vm.setWake(true)
+        ContextCompat.startForegroundService(ctx, Intent(ctx, WakeWordService::class.java))
+    }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> tick++; if (ok) startWake() }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Voice & profile", style = MaterialTheme.typography.titleSmall, color = cs.primary)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(name, { name = it }, singleLine = true, modifier = Modifier.weight(1f), label = { Text("Your name (for the greeting)") })
+            OutlinedButton(onClick = { vm.setUserName(name) }) { Text("Save") }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Switch(
+                checked = ui.wakeEnabled,
+                onCheckedChange = { on ->
+                    if (on) { if (micGranted) startWake() else launcher.launch(Manifest.permission.RECORD_AUDIO) }
+                    else { vm.setWake(false); ctx.stopService(Intent(ctx, WakeWordService::class.java)) }
+                },
+            )
+            Text("Always listen for “Hey AURIX” (shows a microphone notification, uses battery)", style = MaterialTheme.typography.bodySmall)
+        }
+        Text(
+            "To open the voice screen from the background, also enable 'Display over other apps' below and turn off battery optimisation for AURIX.",
+            style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant,
+        )
     }
 }

@@ -15,6 +15,7 @@ object ModelPicker {
     private val datedId = Regex("\\d{4}-\\d{2}-\\d{2}|-\\d{8}$|-\\d{4}$")
 
     fun pick(type: ProviderType, rawIds: List<String>, defStrong: String, defFast: String, host: String = ""): Pick {
+        if (host.contains("openrouter.ai")) pickOpenRouter(rawIds)?.let { return it }
         if (host.contains("groq.com")) {
             val have = rawIds.map { it.removePrefix("models/") }.toSet()
             val s = listOf("llama-3.3-70b-versatile", "llama-3.1-70b-versatile").firstOrNull { it in have }
@@ -45,6 +46,25 @@ object ModelPicker {
         val fastPool = candidates.filter { fastWords.containsMatchIn(it) && !it.contains("lite", true) }
             .ifEmpty { candidates.filter { fastWords.containsMatchIn(it) } }
         val fast = fastPool.maxWithOrNull(versionComparator) ?: strong
+        return Pick(strong, fast)
+    }
+
+    private val vendors = listOf("anthropic/", "openai/", "google/", "x-ai/", "deepseek/", "mistralai/", "meta-llama/", "qwen/")
+
+    /** OpenRouter lists hundreds of models incl. variants (":batch", ":free", previews). Prefer main-line chat models from major vendors. */
+    private fun pickOpenRouter(rawIds: List<String>): Pick? {
+        val ids = rawIds.filter { id ->
+            ':' !in id && vendors.any { id.startsWith(it) } && !exclude.containsMatchIn(id) &&
+                !id.contains("preview", true) && !id.contains("beta", true) && !id.contains("-pro", true).let { pro -> pro && !id.startsWith("google/") }
+        }.distinct()
+        if (ids.isEmpty()) return null
+        fun vendorRank(id: String) = vendors.indexOfFirst { id.startsWith(it) }
+        fun familyRank(id: String) = if (!id.startsWith("anthropic/")) 0 else when {
+            id.contains("fable") -> 0; id.contains("opus") -> 1; id.contains("sonnet") -> 2; else -> 3
+        }
+        val order = compareBy<String>({ vendorRank(it) }, { familyRank(it) }).thenComparator { a, b -> versionComparator.compare(b, a) }
+        val strong = ids.filter { !fastWords.containsMatchIn(it) }.sortedWith(order).firstOrNull() ?: return null
+        val fast = ids.filter { fastWords.containsMatchIn(it) && !it.contains("lite", true) }.sortedWith(compareBy<String>({ vendorRank(it) }).thenComparator { a, b -> versionComparator.compare(b, a) }).firstOrNull() ?: strong
         return Pick(strong, fast)
     }
 

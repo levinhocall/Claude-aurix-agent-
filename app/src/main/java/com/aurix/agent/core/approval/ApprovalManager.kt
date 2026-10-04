@@ -30,6 +30,11 @@ class AgentSettings @Inject constructor(private val secure: SecureSettings) {
     @Volatile private var cache: PermissionMode? = null
     fun mode(): PermissionMode = cache ?: (try { PermissionMode.valueOf(secure.getString("permission_mode") ?: "") } catch (e: Exception) { PermissionMode.STANDARD }).also { cache = it }
     fun setMode(m: PermissionMode) { secure.putString("permission_mode", m.name); cache = m }
+
+    fun userName(): String = secure.getString("user_name").orEmpty()
+    fun setUserName(n: String) { secure.putString("user_name", n.trim().take(30)) }
+    fun wakeEnabled(): Boolean = secure.getString("wake_enabled") == "1"
+    fun setWakeEnabled(on: Boolean) { secure.putString("wake_enabled", if (on) "1" else "0") }
 }
 
 /**

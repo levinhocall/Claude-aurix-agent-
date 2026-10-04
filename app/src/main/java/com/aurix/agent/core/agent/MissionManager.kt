@@ -37,11 +37,12 @@ class MissionManager @Inject constructor(
     private fun wm() = WorkManager.getInstance(context)
     private fun workName(id: String) = "mission-$id"
 
-    suspend fun create(objective: String): String {
+    suspend fun create(objective: String, context: String? = null): String {
         val id = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
         dao.insertMission(MissionEntity(id = id, objective = objective, createdAt = now, updatedAt = now, status = MissionStatus.CREATED, currentAction = "Queued"))
         events.emit(id, AgentEventType.MISSION_CREATED, objective.take(120))
+        if (!context.isNullOrBlank()) events.emit(id, AgentEventType.CONTEXT_PROVIDED, context.take(480))
         start(id)
         return id
     }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -62,6 +63,7 @@ import com.aurix.agent.core.mission.MissionStatus
 import com.aurix.agent.core.mission.StepStatus
 import com.aurix.agent.core.mission.ToolCallEntity
 import com.aurix.agent.ui.AurixGreen
+import com.aurix.agent.ui.AurixSpark
 import com.aurix.agent.ui.AurixGreenBg
 import com.aurix.agent.ui.AurixRedBg
 import org.json.JSONObject
@@ -101,7 +103,7 @@ private fun resultSummary(c: ToolCallEntity): String {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TranscriptScreen(onBack: () -> Unit, onNewTask: () -> Unit, vm: TranscriptViewModel = hiltViewModel()) {
+fun TranscriptScreen(onBack: () -> Unit, onOpenMission: (String) -> Unit, onVoice: () -> Unit, vm: TranscriptViewModel = hiltViewModel()) {
     val st by vm.state.collectAsStateWithLifecycle()
     val m = st.mission
     val listState = rememberLazyListState()
@@ -116,39 +118,46 @@ fun TranscriptScreen(onBack: () -> Unit, onNewTask: () -> Unit, vm: TranscriptVi
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
-        bottomBar = { BottomPanel(m, st.model, vm, onNewTask) },
+        bottomBar = { BottomPanel(m, st.model, vm, onOpenMission, onVoice) },
     ) { pad ->
         LazyColumn(
             state = listState, modifier = Modifier.padding(pad).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 12.dp),
         ) {
-            items(st.items, key = { it.key }) { item -> RenderItem(item, vm, ctx) }
+            items(st.items, key = { it.key }) { item -> RenderItem(item, vm, ctx, onOpenMission) }
         }
     }
 }
 
 @Composable
-private fun BottomPanel(m: MissionEntity?, model: String?, vm: TranscriptViewModel, onNewTask: () -> Unit) {
+private fun BottomPanel(m: MissionEntity?, model: String?, vm: TranscriptViewModel, onOpenMission: (String) -> Unit, onVoice: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Column(Modifier.fillMaxWidth().background(cs.background).navigationBarsPadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (m == null) return@Column
-        Text(
-            "${statusGlyph(m.status)} ${m.status.name.lowercase().replace('_', ' ')} · ${formatTokens(m.tokensUsed)} tok · ${elapsedText(m)}" + (model?.let { " · $it" } ?: ""),
-            fontFamily = Mono, fontSize = 11.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-        )
-        when {
-            m.status.isActive() -> OutlinedButton(onClick = vm::pause, modifier = Modifier.fillMaxWidth()) { Text("■  Stop") }
-            m.status == MissionStatus.PAUSED -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    var text by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxWidth().background(cs.background).navigationBarsPadding().imePadding()) {
+        if (m != null) {
+            val showStatus = (!m.status.isTerminal() && m.status != MissionStatus.PAUSED) || m.status == MissionStatus.FAILED
+            if (showStatus) Text(
+                "${statusGlyph(m.status)} ${m.status.name.lowercase().replace('_', ' ')} · ${formatTokens(m.tokensUsed)} tok · ${elapsedText(m)}" + (model?.let { " · $it" } ?: ""),
+                fontFamily = Mono, fontSize = 10.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 20.dp),
+            )
+        }
+        if (m != null && m.status == MissionStatus.PAUSED) {
+            Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = vm::resume, modifier = Modifier.weight(1f)) { Text("Resume") }
                 OutlinedButton(onClick = vm::cancel, modifier = Modifier.weight(1f)) { Text("Cancel") }
             }
-            else -> OutlinedButton(onClick = onNewTask, modifier = Modifier.fillMaxWidth()) { Text("+  New task") }
         }
+        val busy = m != null && m.status.isActive()
+        Composer(
+            text, { text = it }, { vm.followUp(text, onOpenMission); text = "" }, "Reply to AURIX",
+            busy = busy, onStop = vm::pause, onVoice = onVoice,
+        )
     }
 }
 
 @Composable
-private fun RenderItem(item: TItem, vm: TranscriptViewModel, ctx: android.content.Context) {
+private fun RenderItem(item: TItem, vm: TranscriptViewModel, ctx: android.content.Context, onOpen: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     when (item) {
         is UserMsg -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
@@ -161,9 +170,14 @@ private fun RenderItem(item: TItem, vm: TranscriptViewModel, ctx: android.conten
         is Info -> Text(item.text, fontFamily = Mono, fontSize = 12.sp, color = if (item.warn) cs.tertiary else cs.onSurfaceVariant)
         is ToolRow -> ToolRowView(item.call)
         is LiveRow -> LiveView(item)
-        is ResultMsg -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("✻", color = cs.primary, fontSize = 18.sp)
+        is ResultMsg -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SelectionContainer { MarkdownText(item.text) }
+            val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AurixSpark(18.dp)
+                TextButton(onClick = { clip.setText(androidx.compose.ui.text.AnnotatedString(item.text)) }) { Text("Copy", color = cs.onSurfaceVariant) }
+                TextButton(onClick = { vm.retry(onOpen) }) { Text("Retry", color = cs.onSurfaceVariant) }
+            }
         }
         is ErrorMsg -> Surface(shape = RoundedCornerShape(10.dp), color = AurixRedBg) {
             Text(item.text, color = cs.error, modifier = Modifier.padding(12.dp), fontFamily = Mono, fontSize = 12.sp)
@@ -241,13 +255,11 @@ private fun PlanView(p: PlanCard) {
 @Composable
 private fun LiveView(l: LiveRow) {
     val cs = MaterialTheme.colorScheme
-    val tr = rememberInfiniteTransition(label = "pulse")
-    val a by tr.animateFloat(0.25f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "alpha")
-    val text = if (l.tool) toolLabel(l.text.removePrefix("Using ").trim()) + "  running…" else l.text
-    Row {
-        Text(if (l.tool) "●" else "✻", color = cs.primary, fontFamily = Mono, modifier = Modifier.alpha(a))
-        Spacer(Modifier.width(8.dp))
-        Text(text, color = cs.onSurfaceVariant, fontFamily = Mono, fontSize = 13.sp)
+    val text = if (l.tool) toolLabel(l.text.removePrefix("Using ").trim()) + "…" else l.text
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        AurixSpark(22.dp, spinning = true)
+        Spacer(Modifier.width(10.dp))
+        Text(text, color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

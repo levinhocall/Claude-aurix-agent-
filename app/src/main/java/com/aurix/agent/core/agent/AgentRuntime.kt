@@ -53,6 +53,7 @@ class AgentRuntime @Inject constructor(
         val startedAt = System.currentTimeMillis()
         var replans = 0
         var verifyRounds = 0
+        var ctx: String? = null
         val recent = ArrayDeque<Int>()
     }
 
@@ -68,6 +69,7 @@ class AgentRuntime @Inject constructor(
         if (loaded.status.isTerminal()) return
         val wasPaused = loaded.status == MissionStatus.PAUSED
         val r = Run(loaded)
+        r.ctx = dao.getContext(missionId)
         try {
             stopRequests.remove(missionId)
             r.m = save(r.m.copy(status = MissionStatus.RUNNING, error = null, currentAction = "Starting"))
@@ -92,12 +94,14 @@ class AgentRuntime @Inject constructor(
         }
     }
 
+    private fun objectiveText(r: Run) = "Objective: ${r.m.objective}" + (r.ctx?.let { "\nContext from the previous task: $it" } ?: "")
+
     // ---------------------------------------------------------------- planning
     private suspend fun plan(r: Run) {
         r.m = save(r.m.copy(status = MissionStatus.PLANNING, currentAction = "Creating plan"))
         var titles: List<String>? = null
         for (attempt in 1..limits.maxPlanAttempts) {
-            titles = parseStepList(model(r, "plan", AgentPrompts.plan(registry.names()), "Objective: ${r.m.objective}", 1024))
+            titles = parseStepList(model(r, "plan", AgentPrompts.plan(registry.names()), objectiveText(r), 1024))
             if (titles != null) break
             events.emit(r.m.id, AgentEventType.RECOVERY_STARTED, "Plan was not valid JSON (attempt $attempt)")
         }
@@ -130,7 +134,7 @@ class AgentRuntime @Inject constructor(
         events.emit(id, AgentEventType.STEP_STARTED, "${doneCount + 1}/${steps.size}: ${step.title}")
 
         val base = buildString {
-            append("Objective: ${r.m.objective}\n")
+            append(objectiveText(r)).append('\n')
             val done = steps.filter { it.status == StepStatus.DONE }
             if (done.isNotEmpty()) append("Done:\n").append(done.joinToString("\n") { "- ${cleanTitle(it.title)}: ${it.result.orEmpty().take(900)}" }).append('\n')
             val later = steps.filter { it.idx > step.idx && it.status == StepStatus.PENDING }

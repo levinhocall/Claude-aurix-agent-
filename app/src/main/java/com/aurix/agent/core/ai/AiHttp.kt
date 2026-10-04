@@ -25,8 +25,12 @@ internal fun mapHttpError(code: Int, retryAfter: String?, body: String, secret: 
         else -> AiErrorType.UNKNOWN_ERROR
     }
     val toolMisfire = code == 400 && Regex("tool choice|tool_use_failed|failed to call a function|tool call", RegexOption.IGNORE_CASE).containsMatchIn(detail)
-    val finalType = if (toolMisfire) AiErrorType.MODEL_ERROR else type
-    return AiError(finalType, "HTTP $code: ${redactSecret(detail.take(300), secret)}", retryAfter?.toLongOrNull()?.times(1000), modelSpecific = toolMisfire)
+    val modelProblem = (code == 404 || code == 400) &&
+        Regex("cannot be used with|model_not_found|does not exist|not a chat model|unsupported model|invalid model|no endpoints found|adapter|not supported", RegexOption.IGNORE_CASE).containsMatchIn(detail) &&
+        Regex("model|endpoint|adapter", RegexOption.IGNORE_CASE).containsMatchIn(detail)
+    val specific = toolMisfire || modelProblem
+    val finalType = if (specific) AiErrorType.MODEL_ERROR else type
+    return AiError(finalType, "HTTP $code: ${redactSecret(detail.take(300), secret)}", retryAfter?.toLongOrNull()?.times(1000), modelSpecific = specific)
 }
 
 /** POST JSON, map every failure to a categorized AiError, never leak the secret. */

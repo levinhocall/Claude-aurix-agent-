@@ -26,6 +26,9 @@ internal class Failover(
     private val onTokens: (Int) -> Unit,
     private val sleep: suspend (Long) -> Unit = { delay(it) },
 ) {
+    /** Models that failed with a model-specific error and then worked via the alternate: skipped for the rest of the session. */
+    private val badModels = java.util.Collections.synchronizedSet(HashSet<String>())
+
     suspend fun complete(request: AiRequest): AiResponse {
         checkBudget()
         val usable = providers().filter { it.enabled && it.keys.isNotEmpty() }
@@ -33,7 +36,8 @@ internal class Failover(
         var last: AiError? = null
         for (round in 0..1) {
             for (p in usable) {
-                val model = ModelRouter.modelFor(p, policy(), request)
+                val chosen = ModelRouter.modelFor(p, policy(), request)
+                val model = if (chosen in badModels) (ModelRouter.alternateModel(p, chosen) ?: chosen) else chosen
                 var tried = 0
                 while (tried < MAX_KEYS_PER_PROVIDER) {
                     val key = pool.available(p.keys).firstOrNull() ?: break
@@ -45,7 +49,9 @@ internal class Failover(
                         } catch (e: AiError) {
                             val alt = if (e.modelSpecific) ModelRouter.alternateModel(p, model) else null
                             if (alt == null) throw e
-                            callOnce(p, request.copy(model = alt), key.secret)
+                            val r2 = callOnce(p, request.copy(model = alt), key.secret)
+                            badModels += model
+                            r2
                         }
                         pool.success(key.id, resp.usage.total)
                         onTokens(resp.usage.total)

@@ -5,6 +5,7 @@ import com.aurix.agent.core.ai.routing.ModelPicker
 import com.aurix.agent.core.ai.routing.ProviderType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PickerTest {
@@ -58,5 +59,23 @@ class GroqPickerTest {
     @Test fun genericExcludesToolHijackers() {
         val p = ModelPicker.pick(ProviderType.OPENAI_COMPATIBLE, listOf("openai/gpt-oss-120b", "some-model-2"), "d", "d")
         assertEquals("some-model-2", p.strong)
+    }
+}
+
+class OpenRouterPickerTest {
+    @Test fun skipsBatchVariantsAndPicksMainLineModels() {
+        val ids = listOf(
+            "mistralai/mistral-small-2603:batch", "mistralai/mistral-small-2603", "anthropic/claude-sonnet-4.5", "anthropic/claude-haiku-4.5",
+            "openai/gpt-5", "openai/gpt-5-mini", "qwen/qwen3.8-27b", "openai/gpt-oss-120b:free",
+        )
+        val p = ModelPicker.pick(ProviderType.OPENAI_COMPATIBLE, ids, "d", "d", "https://openrouter.ai/api/v1")
+        assertEquals("anthropic/claude-sonnet-4.5", p.strong)
+        assertEquals("anthropic/claude-haiku-4.5", p.fast)
+    }
+
+    @Test fun batchErrorIsModelSpecific() {
+        val e = mapHttpError(404, null, """{"error":{"message":"mistralai/mistral-small-2603:batch cannot be used with the chat/completions endpoint (adapter MistralBatchAdapter)."}}""", "k")
+        assertEquals(AiErrorType.MODEL_ERROR, e.type)
+        assertTrue(e.modelSpecific)
     }
 }

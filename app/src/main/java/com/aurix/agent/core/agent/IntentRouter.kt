@@ -4,7 +4,7 @@ import com.aurix.agent.core.tools.device.foldText
 import org.json.JSONObject
 import java.util.Calendar
 
-data class RoutedCommand(val tool: String, val input: JSONObject, val title: String)
+data class RoutedCommand(val tool: String, val input: JSONObject, val title: String, val contact: String? = null)
 
 /**
  * Offline, keyless command router for simple single-action phone commands in English/Hindi/Hinglish.
@@ -19,18 +19,89 @@ object IntentRouter {
     )
 
     fun route(text: String, nowHour: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)): RoutedCommand? {
-        val raw = text.trim().lowercase()
-        if (raw.isEmpty() || raw.length > 100) return null
+        val orig = text.trim()
+        if (orig.isEmpty() || orig.length > 400) return null
+        contactCommand(orig)?.let { return it }
+        val raw = orig.lowercase()
+        if (raw.length > 100) return null
         val t = foldText(raw)
         val w = t.split(' ').filter { it.isNotEmpty() }
         if (w.isEmpty() || w.size > 12) return null
         if (w.any { it in joiners } || t.contains("uske baad")) return null
-        return flashlight(w) ?: timerOrAlarm(raw, t, w, nowHour) ?: volume(raw, w) ?: screenKey(t, w) ?: scroll(w) ?: battery(w)
+        return flashlight(w) ?: timerOrAlarm(raw, t, w, nowHour) ?: volume(raw, w) ?: brightness(raw, w) ?: vibrate(w) ?: screenKey(t, w) ?: scroll(w) ?: battery(w) ?: networkOrPanel(t, w) ?: deviceInfo(t)
             ?: location(t) ?: storage(w) ?: media(w) ?: callNumber(raw) ?: navigate(t, w) ?: playMusic(t, w) ?: openApp(t, w)
     }
 
     private fun cmd(tool: String, title: String, vararg kv: Pair<String, Any>) =
         RoutedCommand(tool, JSONObject().also { j -> kv.forEach { (k, v) -> j.put(k, v) } }, title)
+
+    // ------------------------------------------------------------ message / call a contact by name (resolved on the phone, never guessed)
+    private val bareVerbs = setOf("bhejo", "bhej", "karo", "kro", "send", "ki", "ke", "ye", "bhej do", "kar do")
+    private val smsHi = Regex("^(?:please\\s+)?(.+?)\\s+ko\\s+(whatsapp\\s+(?:pe\\s+|par\\s+)?)?(?:message|msg|sms|text)\\s*(?:send\\s+)?(?:bhejo|bhej\\s+do|bhej|karo|kro|kar\\s+do|send\\s+karo|send\\s+kro|send)?\\s*(?:ki|ke\\s+liye|ye)?\\s*(.+)$", RegexOption.IGNORE_CASE)
+    private val waHi = Regex("^whatsapp\\s+(?:pe|par|me|mein)\\s+(.+?)\\s+ko\\s+(?:bol|bolo|bhejo|message|msg|bhej\\s+do)(?:\\s+(?:ki|ke))?\\s+(.+)$", RegexOption.IGNORE_CASE)
+    private val enMarked = Regex("^(?:send\\s+)?(?:a\\s+)?(whatsapp\\s+)?(?:message|msg|sms|text)\\s+(?:to\\s+)?(\\p{L}+(?:\\s+\\p{L}+)?)\\s+(?:that|saying|:)\\s*(.+)$", RegexOption.IGNORE_CASE)
+    private val enPlain = Regex("^(?:send\\s+)?(whatsapp\\s+)?(?:message|msg|text)\\s+(?:to\\s+)?(\\p{L}+)\\s+(.+)$", RegexOption.IGNORE_CASE)
+    private val callEn = Regex("^call\\s+(\\p{L}[\\p{L}\\s]{0,30})$", RegexOption.IGNORE_CASE)
+    private val callHi = Regex("^(.+?)\\s+ko\\s+call\\s+(?:karo|kro|lagao|laga\\s+do|kar\\s+do)$", RegexOption.IGNORE_CASE)
+
+    private fun cleanName(n: String): String? {
+        var s = n.trim().replace(Regex("^(my|meri|mera|mere)\\s+", RegexOption.IGNORE_CASE), "").trim()
+        s = s.trim('"', '\'')
+        return if (s.isEmpty() || s.length > 30) null else s
+    }
+
+    private fun message(name: String, text: String, whatsapp: Boolean): RoutedCommand? {
+        val n = cleanName(name) ?: return null
+        val body = text.trim()
+        if (body.isEmpty() || body.length > 300 || body.lowercase() in bareVerbs) return null
+        val tool = if (whatsapp) "WHATSAPP_MESSAGE" else "SEND_SMS"
+        return RoutedCommand(tool, JSONObject().put("text", body), (if (whatsapp) "WhatsApp " else "Text ") + n, contact = n)
+    }
+
+    private fun contactCommand(orig: String): RoutedCommand? {
+        waHi.find(orig)?.let { m -> return message(m.groupValues[1], m.groupValues[2], true) }
+        enMarked.find(orig)?.let { m -> return message(m.groupValues[2], m.groupValues[3], m.groupValues[1].isNotBlank()) }
+        smsHi.find(orig)?.let { m -> return message(m.groupValues[1], m.groupValues[3], m.groupValues[2].isNotBlank() || orig.lowercase().contains("whatsapp")) }
+        enPlain.find(orig)?.let { m -> return message(m.groupValues[2], m.groupValues[3], m.groupValues[1].isNotBlank()) }
+        val call = callHi.find(orig)?.groupValues?.get(1) ?: callEn.find(orig)?.groupValues?.get(1)
+        if (call != null) {
+            val n = cleanName(call) ?: return null
+            if (n.split(' ').size > 3) return null
+            return RoutedCommand("CALL_PHONE", JSONObject(), "Call $n", contact = n)
+        }
+        return null
+    }
+
+    // ------------------------------------------------------------ more device commands
+    private fun brightness(raw: String, w: List<String>): RoutedCommand? {
+        if (w.none { it == "brightness" || it == "brightnes" }) return null
+        val num = Regex("\\b(\\d{1,3})\\s*(%|percent)?").find(raw)?.groupValues?.get(1)?.toIntOrNull()
+        return when {
+            num != null && num in 1..100 -> cmd("BRIGHTNESS", "Brightness $num%", "level" to num)
+            w.any { it in setOf("full", "max", "maximum", "poori", "puri") } -> cmd("BRIGHTNESS", "Brightness max", "level" to 100)
+            w.any { it in setOf("badhao", "badha", "increase", "up", "zyada", "more", "high") } -> cmd("BRIGHTNESS", "Brightness up", "delta" to 20)
+            w.any { it in setOf("kam", "ghatao", "ghata", "decrease", "down", "lower", "dim", "low") } -> cmd("BRIGHTNESS", "Brightness down", "delta" to -20)
+            else -> null
+        }
+    }
+
+    private fun vibrate(w: List<String>): RoutedCommand? =
+        if (w.any { it == "vibrate" || it == "vibration" } && w.size <= 5) cmd("VIBRATE", "Vibrate", "ms" to 600) else null
+
+    private fun networkOrPanel(t: String, w: List<String>): RoutedCommand? {
+        val wifi = t.contains("wifi") || t.contains("wi fi")
+        val bt = "bluetooth" in w
+        val net = "internet" in w || "network" in w
+        if (!(wifi || bt || net) || w.size > 6) return null
+        if (w.any { it in setOf("status", "check", "connected", "working", "chal", "raha", "connection") }) return cmd("NETWORK_STATUS", "Network status")
+        if ((wifi || bt) && w.any { it in setOf("on", "off", "settings", "kholo", "chalu", "band", "enable", "disable", "toggle", "open", "karo", "kro") })
+            return cmd("OPEN_SETTINGS_PANEL", if (bt) "Bluetooth settings" else "Wi-Fi settings", "panel" to if (bt) "bluetooth" else "internet")
+        return null
+    }
+
+    private fun deviceInfo(t: String): RoutedCommand? =
+        if (listOf("device info", "phone info", "phone ki info", "system info", "about my phone", "about this phone", "mera phone kaun sa").any { t.contains(it) })
+            cmd("DEVICE_INFO", "Device info") else null
 
     private fun flashlight(w: List<String>): RoutedCommand? {
         val has = w.any { it == "flashlight" || it == "torch" || it == "tourch" || it == "tarch" } || ("flash" in w && "light" in w)

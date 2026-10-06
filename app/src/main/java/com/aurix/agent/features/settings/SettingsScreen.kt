@@ -197,6 +197,16 @@ private fun ApprovalAndPermissions(strict: Boolean, always: List<String>, onRevo
                 ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName)))
             }) { Text("Open") }
         }
+        val writeSettings = remember(tick) { Settings.System.canWrite(ctx) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Modify system settings")
+                Text("lets AURIX change screen brightness", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            }
+            if (writeSettings) Text("✓ granted", color = cs.primary) else OutlinedButton(onClick = {
+                ctx.startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + ctx.packageName)))
+            }) { Text("Open") }
+        }
         val a11y = remember(tick) { AurixAccessibilityService.enabledInSettings(ctx) }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {

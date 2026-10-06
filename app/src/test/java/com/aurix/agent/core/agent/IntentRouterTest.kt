@@ -100,3 +100,57 @@ class IntentRouterTest {
         assertFalse(isLocalNetworkHost("api.openai.com"))
     }
 }
+
+class ContactRoutingTest {
+    private fun r(s: String) = IntentRouter.route(s, 10)
+
+    @Test fun smsToContactByName() {
+        val c = r("mom ko message send kro ki late aaunga")!!
+        assertEquals("SEND_SMS", c.tool); assertEquals("mom", c.contact); assertEquals("late aaunga", c.input.getString("text"))
+        val d = r("Rahul ko message bhejo ki main 20 minute late hoon")!!
+        assertEquals("Rahul", d.contact); assertEquals("main 20 minute late hoon", d.input.getString("text"))
+        assertEquals("mom", r("meri mom ko sms bhejo ki call me")!!.contact)
+    }
+
+    @Test fun englishForms() {
+        val a = r("send message to mom that I will be late")!!
+        assertEquals("SEND_SMS", a.tool); assertEquals("mom", a.contact); assertEquals("I will be late", a.input.getString("text"))
+        val b = r("text rahul reaching in 10")!!
+        assertEquals("rahul", b.contact); assertEquals("reaching in 10", b.input.getString("text"))
+    }
+
+    @Test fun whatsappForms() {
+        val a = r("whatsapp pe Rahul ko bol main 20 minute late hoon")!!
+        assertEquals("WHATSAPP_MESSAGE", a.tool); assertEquals("Rahul", a.contact)
+        assertEquals("WHATSAPP_MESSAGE", r("mom ko whatsapp message bhejo ki aa rahi hu")!!.tool)
+    }
+
+    @Test fun callByName() {
+        assertEquals("CALL_PHONE", r("call mom")!!.tool)
+        assertEquals("mom", r("mom ko call karo")!!.contact)
+        assertEquals("number", r("call 9876543210")!!.input.keys().next().let { "number" })
+    }
+
+    @Test fun incompleteMessagesAreNotRouted() {
+        assertNull(r("mom ko message bhejo"))
+        assertNull(r("rahul ko call karo aur message bhejo"))
+    }
+
+    @Test fun newDeviceCommands() {
+        assertEquals(50, r("brightness 50")!!.input.getInt("level"))
+        assertEquals(20, r("brightness badhao")!!.input.getInt("delta"))
+        assertEquals("VIBRATE", r("phone vibrate karo")!!.tool)
+        assertEquals("NETWORK_STATUS", r("internet chal raha hai")!!.tool)
+        assertEquals("bluetooth", r("bluetooth on karo")!!.input.getString("panel"))
+        assertEquals("internet", r("wifi settings kholo")!!.input.getString("panel"))
+        assertEquals("DEVICE_INFO", r("device info")!!.tool)
+    }
+
+    @Test fun whatsappNumbers() {
+        assertEquals("919876543210", com.aurix.agent.core.tools.device.normalizeForWhatsApp("+91 98765-43210", "91"))
+        assertEquals("919876543210", com.aurix.agent.core.tools.device.normalizeForWhatsApp("9876543210", "91"))
+        assertEquals("919876543210", com.aurix.agent.core.tools.device.normalizeForWhatsApp("09876543210", "91"))
+        assertNull(com.aurix.agent.core.tools.device.normalizeForWhatsApp("9876543210", null))
+        assertNull(com.aurix.agent.core.tools.device.normalizeForWhatsApp("123", "91"))
+    }
+}

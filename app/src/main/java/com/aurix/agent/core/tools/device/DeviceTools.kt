@@ -334,36 +334,20 @@ class LookupContactTool(private val ctx: Context) : Tool {
     override val timeoutMs = 10_000L
     override fun describe(input: JSONObject) = "Look up contact: ${input.optString("name")}"
 
+    private val resolver = ContactResolver(ctx)
+
     override suspend fun execute(input: JSONObject, ctx0: ToolContext): ToolResult {
-        requirePermission(ctx, android.Manifest.permission.READ_CONTACTS, "Contacts")
         val q = input.optString("name").trim()
         if (q.isEmpty()) throw ToolException(ToolErrorType.INVALID_INPUT, "name is empty")
-        val found = LinkedHashMap<String, Triple<String, String, Int>>() // number -> (name, number, score)
-        ctx.contentResolver.query(
-            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-            arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
-            null, null, null,
-        )?.use { c ->
-            var n = 0
-            while (c.moveToNext() && n++ < 20_000) {
-                val name = c.getString(0).orEmpty(); val num = c.getString(1).orEmpty()
-                val sc = contactScore(name, q)
-                if (sc > 0) {
-                    val key = num.filter { it.isDigit() }.takeLast(10)
-                    val old = found[key]
-                    if (old == null || old.third < sc) found[key] = Triple(name, num, sc)
-                }
-            }
-        }
-        val ranked = found.values.sortedByDescending { it.third }.take(5)
+        val ranked = resolver.search(q)
         if (ranked.isEmpty()) return ToolResult.ok("No contact matches '$q'")
-        val exact = ranked.filter { it.third == 100 }
+        val exact = ranked.filter { it.score == 100 }
         val head = when {
             exact.size == 1 -> "EXACT match:"
             exact.size > 1 -> "Several EXACT matches (ask the user which):"
             else -> "No exact match. Candidates (do NOT guess, use ASK_USER):"
         }
-        return ToolResult.ok(head + "\n" + ranked.joinToString("\n") { "${it.first}: ${it.second}" })
+        return ToolResult.ok(head + "\n" + ranked.joinToString("\n") { "${it.name}: ${it.number}" })
     }
 }
 
@@ -411,5 +395,5 @@ object DeviceTools {
         OpenAppTool(ctx), OpenUrlTool(ctx), PlayMusicTool(ctx), SetAlarmTool(ctx), SetTimerTool(ctx), FlashlightTool(ctx),
         BatteryTool(ctx), VolumeTool(ctx), MediaControlTool(ctx), ClipboardTool(ctx), SendSmsTool(ctx), CallPhoneTool(ctx),
         LookupContactTool(ctx), LocationTool(ctx), NavigateTool(ctx),
-    )
+    ) + MoreDeviceTools.all(ctx)
 }

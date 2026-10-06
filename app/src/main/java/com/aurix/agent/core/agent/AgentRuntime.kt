@@ -13,7 +13,11 @@ import com.aurix.agent.core.mission.MissionEntity
 import com.aurix.agent.core.mission.MissionStatus
 import com.aurix.agent.core.mission.StepEntity
 import com.aurix.agent.core.mission.StepStatus
+import com.aurix.agent.core.approval.QuestionManager
 import com.aurix.agent.core.tools.RiskLevel
+import com.aurix.agent.core.tools.ToolException
+import com.aurix.agent.core.tools.device.ContactResolver
+import com.aurix.agent.core.tools.device.foldText
 import com.aurix.agent.core.tools.ToolErrorType
 import com.aurix.agent.core.tools.ToolExecutor
 import com.aurix.agent.core.tools.ToolResult
@@ -43,6 +47,8 @@ class AgentRuntime @Inject constructor(
     private val workspace: Workspace,
     private val approvals: ApprovalManager,
     private val notifier: MissionNotifier,
+    private val contacts: ContactResolver,
+    private val questions: QuestionManager,
 ) {
     private val limits = AgentLimits()
     private val stopRequests = ConcurrentHashMap<String, MissionStatus>()
@@ -241,11 +247,21 @@ class AgentRuntime @Inject constructor(
     /** Simple phone commands run straight through the same approval/executor path: no model call, no key, no internet. Returns false to hand over to the AI planner. */
     private suspend fun runLocal(r: Run, cmd: RoutedCommand): Boolean {
         val id = r.m.id
-        val title = "${cmd.title} [${cmd.tool}]"
+        var title = "${cmd.title} [${cmd.tool}]"
         dao.upsertSteps(listOf(StepEntity(id, 0, title, StepStatus.RUNNING, null, 1)))
         r.m = save(r.m.copy(totalSteps = 1, currentStep = 0, currentAction = cmd.title))
         events.emit(id, AgentEventType.PLAN_CREATED, "1 step (local, no AI needed)")
-        return when (val o = gatedExecute(r, 0, cmd.title, cmd.tool, cmd.input, "")) {
+        var input = cmd.input
+        var shownTitle = cmd.title
+        val who = cmd.contact
+        if (who != null) {
+            val chosen = resolveContact(r, who) ?: return true
+            input = JSONObject(cmd.input.toString()).put("number", chosen.second).put("to", chosen.first)
+            shownTitle = cmd.title.replace(who, chosen.first, ignoreCase = true)
+            title = "$shownTitle [${cmd.tool}]"
+            dao.upsertSteps(listOf(StepEntity(id, 0, title, StepStatus.RUNNING, null, 1)))
+        }
+        return when (val o = gatedExecute(r, 0, shownTitle, cmd.tool, input, "")) {
             is ToolOutcome.Denied -> {
                 dao.upsertSteps(listOf(StepEntity(id, 0, title, StepStatus.FAILED, "Denied by the user", 1)))
                 r.m = save(r.m.copy(finalResult = "Okay, I did not do it."))
@@ -271,6 +287,33 @@ class AgentRuntime @Inject constructor(
                 }
             }
         }
+    }
+
+    private suspend fun failLocal(r: Run, msg: String) {
+        val id = r.m.id
+        dao.upsertSteps(dao.getSteps(id).map { it.copy(status = StepStatus.FAILED, result = msg) })
+        r.m = save(r.m.copy(finalResult = msg))
+        end(id, MissionStatus.FAILED, "Failed", msg)
+    }
+
+    /** (display name, number) of the contact to use, or null after failing the mission. Never guesses: a non-exact or multiple match asks the user. */
+    private suspend fun resolveContact(r: Run, name: String): Pair<String, String>? {
+        val id = r.m.id
+        val matches = try { contacts.search(name) } catch (e: ToolException) { failLocal(r, e.message ?: "Contacts are not accessible."); return null }
+        if (matches.isEmpty()) { failLocal(r, "No contact matches \"$name\"."); return null }
+        val exact = matches.filter { it.score == 100 }
+        if (exact.size == 1) return exact[0].name to exact[0].number
+        val pool = (if (exact.size > 1) exact else matches).take(4)
+        val labels = pool.map { "${it.name} (…${it.number.filter { c -> c.isDigit() }.takeLast(4)})" }
+        r.m = save(r.m.copy(currentAction = "Choosing contact"))
+        val answer = try { questions.ask(id, "Which contact do you mean for \"$name\"?", labels) } catch (e: ToolException) { failLocal(r, e.message ?: "No answer."); return null }
+        r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = "Working"))
+        val a = foldText(answer)
+        val hit = pool.indices.firstOrNull { labels[it] == answer }
+            ?: pool.indices.firstOrNull { i -> a.isNotEmpty() && foldText(pool[i].name).let { it == a || it.contains(a) } }
+            ?: pool.indices.firstOrNull { i -> a.isNotEmpty() && a.all { it.isDigit() } && pool[i].number.filter { it.isDigit() }.endsWith(a) }
+        if (hit == null) { failLocal(r, "I could not tell which contact you meant (\"$answer\")."); return null }
+        return pool[hit].name to pool[hit].number
     }
 
     // ---------------------------------------------------------------- recovery

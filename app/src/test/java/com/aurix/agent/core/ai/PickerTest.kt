@@ -79,3 +79,19 @@ class OpenRouterPickerTest {
         assertTrue(e.modelSpecific)
     }
 }
+
+class LocalModelTest {
+    @Test fun picksBiggestAndSmallestLocalModels() {
+        val p = ModelPicker.pickLocal(listOf("llama3.1:8b", "qwen2.5:14b-instruct", "llama3.2:1b", "nomic-embed-text"))!!
+        assertEquals("qwen2.5:14b-instruct", p.strong)
+        assertEquals("llama3.2:1b", p.fast)
+    }
+
+    @Test fun localUrlsAreAcceptedKeyless() {
+        val p = KeyDetector.detect("", "http://192.168.1.5:11434/v1")!!
+        assertTrue(p.local)
+        assertEquals("Local model", p.name)
+        assertNull(KeyDetector.detect("", "http://example.com/v1"))
+        assertNull(KeyDetector.detect("", ""))
+    }
+}

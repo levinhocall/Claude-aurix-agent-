@@ -219,8 +219,8 @@ class BatteryTool(private val ctx: Context) : Tool {
 
 class VolumeTool(private val ctx: Context) : Tool {
     override val name = "SET_VOLUME"
-    override val description = "Set media volume 0-100 (omit level to just read it)."
-    override val inputSchema = """{"level":50}"""
+    override val description = "Set media volume 0-100 (level), or change it relative (delta, e.g. 15 or -15). Omit both to just read it."
+    override val inputSchema = """{"level":50} | {"delta":15}"""
     override val outputSchema = "current volume"
     override val risk = RiskLevel.LOW
     override val timeoutMs = 5_000L
@@ -228,7 +228,10 @@ class VolumeTool(private val ctx: Context) : Tool {
     override suspend fun execute(input: JSONObject, ctx0: ToolContext): ToolResult {
         val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        if (input.has("level")) {
+        if (input.has("delta")) {
+            val cur = am.getStreamVolume(AudioManager.STREAM_MUSIC) * 100 / max.coerceAtLeast(1)
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, (cur + input.optInt("delta")).coerceIn(0, 100) * max / 100, 0)
+        } else if (input.has("level")) {
             val lv = input.optInt("level").coerceIn(0, 100)
             am.setStreamVolume(AudioManager.STREAM_MUSIC, lv * max / 100, 0)
         }

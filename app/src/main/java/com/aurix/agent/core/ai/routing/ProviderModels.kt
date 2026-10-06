@@ -24,9 +24,11 @@ data class ProviderEntry(
     /** true = keys belong to separate accounts/projects, so a rate-limited key may fail over to the next key of the same provider. */
     val independentKeys: Boolean = false,
     val keys: List<KeyEntry> = emptyList(),
+    /** Keyless server on the local network (e.g. Ollama). Needs no API key. */
+    val local: Boolean = false,
 )
 
-data class Preset(val name: String, val type: ProviderType, val baseUrl: String, val fast: String, val strong: String)
+data class Preset(val name: String, val type: ProviderType, val baseUrl: String, val fast: String, val strong: String, val local: Boolean = false)
 
 object Presets {
     val all = listOf(
@@ -44,7 +46,7 @@ object ProviderCodec {
         list.forEach { p ->
             arr.put(
                 JSONObject().put("id", p.id).put("type", p.type.name).put("name", p.name).put("baseUrl", p.baseUrl)
-                    .put("fast", p.fastModel).put("strong", p.strongModel).put("enabled", p.enabled).put("independent", p.independentKeys)
+                    .put("fast", p.fastModel).put("strong", p.strongModel).put("enabled", p.enabled).put("independent", p.independentKeys).put("local", p.local)
                     .put("keys", JSONArray().also { ka ->
                         p.keys.forEach { k -> ka.put(JSONObject().put("id", k.id).put("label", k.label).put("secret", k.secret)) }
                     })
@@ -62,7 +64,7 @@ object ProviderCodec {
                 type = try { ProviderType.valueOf(o.optString("type")) } catch (e: Exception) { ProviderType.OPENAI_COMPATIBLE },
                 name = o.optString("name"), baseUrl = o.optString("baseUrl"),
                 fastModel = o.optString("fast"), strongModel = o.optString("strong"),
-                enabled = o.optBoolean("enabled", true), independentKeys = o.optBoolean("independent", false),
+                enabled = o.optBoolean("enabled", true), independentKeys = o.optBoolean("independent", false), local = o.optBoolean("local", false),
                 keys = (0 until ka.length()).mapNotNull { j ->
                     val k = ka.optJSONObject(j) ?: return@mapNotNull null
                     KeyEntry(k.optString("id"), k.optString("label"), k.optString("secret"))

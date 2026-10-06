@@ -16,14 +16,19 @@ internal fun requireService(): AurixAccessibilityService = AurixAccessibilitySer
 object ScreenGuard {
     const val OWN_PACKAGE = "com.aurix.agent"
     private val blocked = listOf("permissioncontroller", "packageinstaller")
-    private val sensitive = listOf(
+    private val financial = listOf(
         "paisa", "phonepe", "paytm", "bhim", "upi", "bank", "wallet", "authenticator", "bitwarden", "keepass", "lastpass",
-        "1password", "passwords", "gpay", "razorpay", "mobikwik", "creditcard", "netbanking", "com.android.settings",
+        "1password", "passwords", "gpay", "razorpay", "mobikwik", "creditcard", "netbanking",
     )
 
-    fun isSensitive(pkg: String) = sensitive.any { pkg.contains(it, ignoreCase = true) }
+    fun isSensitive(pkg: String) = financial.any { pkg.contains(it, ignoreCase = true) } || pkg == "com.android.settings"
 
-    fun riskFor(pkg: String, base: RiskLevel): RiskLevel = if (isSensitive(pkg)) RiskLevel.HIGH else base
+    /** Money/password apps: CRITICAL (never auto-allowed). Android Settings: HIGH. */
+    fun riskFor(pkg: String, base: RiskLevel): RiskLevel = when {
+        financial.any { pkg.contains(it, ignoreCase = true) } -> RiskLevel.CRITICAL
+        pkg == "com.android.settings" -> RiskLevel.HIGH
+        else -> base
+    }
 
     /** Throws if automation must never run in this app. */
     fun check(pkg: String) {

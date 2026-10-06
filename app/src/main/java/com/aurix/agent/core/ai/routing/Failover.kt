@@ -31,8 +31,8 @@ internal class Failover(
 
     suspend fun complete(request: AiRequest): AiResponse {
         checkBudget()
-        val usable = providers().filter { it.enabled && it.keys.isNotEmpty() }
-        if (usable.isEmpty()) throw AiError(AiErrorType.AUTH_ERROR, "No provider with an API key is configured. Open Settings.")
+        val usable = providers().filter { it.enabled && (it.local || it.keys.isNotEmpty()) }
+        if (usable.isEmpty()) throw AiError(AiErrorType.AUTH_ERROR, "No AI provider is configured. Add an API key (or a local model) in Settings.")
         var last: AiError? = null
         for (round in 0..1) {
             for (p in usable) {
@@ -40,7 +40,7 @@ internal class Failover(
                 val model = if (chosen in badModels) (ModelRouter.alternateModel(p, chosen) ?: chosen) else chosen
                 var tried = 0
                 while (tried < MAX_KEYS_PER_PROVIDER) {
-                    val key = pool.available(p.keys).firstOrNull() ?: break
+                    val key = pool.available(keysOf(p)).firstOrNull() ?: break
                     tried++
                     pool.markUsed(key.id)
                     try {
@@ -88,7 +88,9 @@ internal class Failover(
         )
     }
 
-    private fun soonest(list: List<ProviderEntry>): Long? = list.mapNotNull { pool.nextAvailableIn(it.keys) }.minOrNull()
+    private fun soonest(list: List<ProviderEntry>): Long? = list.mapNotNull { pool.nextAvailableIn(keysOf(it)) }.minOrNull()
+
+    private fun keysOf(p: ProviderEntry): List<KeyEntry> = if (p.local) listOf(KeyEntry("local-${p.id}", "local", "")) else p.keys
 
     private suspend fun callOnce(p: ProviderEntry, req: AiRequest, secret: String): AiResponse {
         val a = adapter(p)

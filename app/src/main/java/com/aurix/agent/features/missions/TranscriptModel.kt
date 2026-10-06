@@ -17,7 +17,7 @@ data class ToolRow(val call: ToolCallEntity) : TItem { override val key = "t-${c
 data class LiveRow(val text: String, val tool: Boolean) : TItem { override val key = "live" }
 data class ResultMsg(val text: String) : TItem { override val key = "result" }
 data class ErrorMsg(val text: String) : TItem { override val key = "error" }
-data class ApprovalCard(val approvalKey: String, val tool: String, val summary: String, val reason: String) : TItem { override val key = "approval-$approvalKey" }
+data class ApprovalCard(val approvalKey: String, val tool: String, val summary: String, val reason: String, val risk: String) : TItem { override val key = "approval-$approvalKey" }
 data class QuestionCard(val qkey: String, val question: String, val options: List<String>) : TItem { override val key = "question-$qkey" }
 data class FilesBlock(val files: List<MissionFileEntity>) : TItem { override val key = "files" }
 
@@ -57,7 +57,7 @@ fun buildDetailState(
     if (steps.isNotEmpty()) out += PlanCard(steps)
     out += timed.map { it.second }
     questions.filterKeys { it !in answered }.forEach { (k, j) -> out += QuestionCard(k, j.optString("question"), j.optJSONArray("options")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()) }
-    requests.filterKeys { it !in decided }.forEach { (k, j) -> out += ApprovalCard(k, j.optString("tool"), j.optString("summary"), j.optString("reason")) }
+    requests.filterKeys { it !in decided }.forEach { (k, j) -> out += ApprovalCard(k, j.optString("tool"), j.optString("summary"), j.optString("reason"), j.optString("risk")) }
     when (m.status) {
         MissionStatus.PLANNING, MissionStatus.CREATED -> out += LiveRow(if (m.status == MissionStatus.CREATED) m.currentAction.ifBlank { "Queued" } else "Planning…", false)
         MissionStatus.WAITING_FOR_TOOL -> out += LiveRow(m.currentAction, true)

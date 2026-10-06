@@ -43,21 +43,24 @@ class MissionManager @Inject constructor(
         dao.insertMission(MissionEntity(id = id, objective = objective, createdAt = now, updatedAt = now, status = MissionStatus.CREATED, currentAction = "Queued"))
         events.emit(id, AgentEventType.MISSION_CREATED, objective.take(120))
         if (!context.isNullOrBlank()) events.emit(id, AgentEventType.CONTEXT_PROVIDED, context.take(480))
-        start(id)
+        start(id, IntentRouter.route(objective) == null)
         return id
     }
 
-    fun start(id: String) {
+    fun start(id: String, needsNetwork: Boolean = true) {
         val req = OneTimeWorkRequestBuilder<MissionWorker>()
             .setInputData(workDataOf(MissionWorker.KEY_ID to id))
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setConstraints(Constraints.Builder().apply { if (needsNetwork) setRequiredNetworkType(NetworkType.CONNECTED) }.build())
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
         wm().enqueueUniqueWork(workName(id), ExistingWorkPolicy.KEEP, req)
     }
 
-    fun resume(id: String) = start(id)
+    fun resume(id: String) { scope.launch { start(id, needsNetworkFor(id)) } }
+
+    private suspend fun needsNetworkFor(id: String): Boolean =
+        dao.getMission(id)?.let { IntentRouter.route(it.objective) == null } ?: true
     fun pause(id: String) = stop(id, MissionStatus.PAUSED)
     fun cancel(id: String) = stop(id, MissionStatus.CANCELLED)
 
@@ -78,6 +81,6 @@ class MissionManager @Inject constructor(
 
     /** Process start: re-attach any unfinished mission to the queue (KEEP = no duplicate if WorkManager already has it). */
     fun onAppStart() {
-        scope.launch { dao.getActiveMissions().forEach { start(it.id) } }
+        scope.launch { dao.getActiveMissions().forEach { start(it.id, IntentRouter.route(it.objective) == null) } }
     }
 }

@@ -43,7 +43,7 @@ class ToolExecutor @Inject constructor(
             ?: return ToolResult.fail(ToolErrorType.INVALID_INPUT, "Unknown tool '$name'. Available: ${registry.names()}")
         val missing = tool.required.filter { !input.has(it) || input.isNull(it) }
         if (missing.isNotEmpty()) return ToolResult.fail(ToolErrorType.INVALID_INPUT, "Missing input field(s): ${missing.joinToString()}. Schema: ${tool.inputSchema}")
-        if (tool.riskFor(input) == RiskLevel.HIGH && !approved) return ToolResult.fail(ToolErrorType.PERMISSION_REQUIRED, "This action needs user approval")
+        if (tool.riskFor(input).ordinal >= RiskLevel.HIGH.ordinal && !approved) return ToolResult.fail(ToolErrorType.PERMISSION_REQUIRED, "This action needs user approval")
 
         var attempt = 0
         while (true) {

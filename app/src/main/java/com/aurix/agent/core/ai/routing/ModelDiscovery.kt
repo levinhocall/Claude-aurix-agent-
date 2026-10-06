@@ -15,7 +15,7 @@ class ModelDiscovery @Inject constructor(private val client: OkHttpClient) {
         val base = baseUrl.trimEnd('/')
         val json = when (type) {
             ProviderType.ANTHROPIC -> client.getJson("$base/v1/models?limit=100", mapOf("x-api-key" to secret, "anthropic-version" to "2023-06-01"), secret)
-            ProviderType.OPENAI_COMPATIBLE -> client.getJson("$base/models", mapOf("Authorization" to "Bearer $secret"), secret)
+            ProviderType.OPENAI_COMPATIBLE -> client.getJson("$base/models", if (secret.isBlank()) emptyMap() else mapOf("Authorization" to "Bearer $secret"), secret)
         }
         val arr = json.optJSONArray("data") ?: json.optJSONArray("models") ?: return emptyList()
         return (0 until arr.length()).mapNotNull { i ->
@@ -27,9 +27,13 @@ class ModelDiscovery @Inject constructor(private val client: OkHttpClient) {
     suspend fun pick(preset: Preset, secret: String): Pair<ModelPicker.Pick, String?> {
         return try {
             val ids = listModels(preset.type, preset.baseUrl, secret)
+            if (preset.local) {
+                val p = ModelPicker.pickLocal(ids) ?: throw com.aurix.agent.core.ai.AiError(com.aurix.agent.core.ai.AiErrorType.MODEL_ERROR, "The local server has no chat models. Pull one first (e.g. ollama pull llama3.2).")
+                return p to null
+            }
             ModelPicker.pick(preset.type, ids, preset.strong, preset.fast, preset.baseUrl) to null
         } catch (e: AiError) {
-            if (e.type == com.aurix.agent.core.ai.AiErrorType.AUTH_ERROR) throw e
+            if (e.type == com.aurix.agent.core.ai.AiErrorType.AUTH_ERROR || preset.strong.isBlank()) throw e
             ModelPicker.Pick(preset.strong, preset.fast) to "Could not list models (${e.type}); using defaults"
         }
     }

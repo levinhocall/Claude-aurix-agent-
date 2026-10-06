@@ -43,4 +43,7 @@ interface MissionDao {
     @Query("SELECT * FROM mission_events WHERE missionId = :id AND type LIKE 'QUESTION_%' ORDER BY id ASC") suspend fun getQuestionEvents(id: String): List<EventEntity>
 
     @Query("SELECT detail FROM mission_events WHERE missionId = :id AND type = 'CONTEXT_PROVIDED' ORDER BY id LIMIT 1") suspend fun getContext(id: String): String?
+
+    @Query("SELECT * FROM tool_calls ORDER BY ts DESC LIMIT 5000") suspend fun getAllToolCalls(): List<ToolCallEntity>
+    @Query("SELECT * FROM mission_events WHERE type LIKE 'APPROVAL_%' OR type LIKE 'QUESTION_%' OR type IN ('MISSION_CREATED','MISSION_COMPLETED','MISSION_FAILED','MISSION_CANCELLED','MISSION_PAUSED','MISSION_RESUMED') ORDER BY ts DESC LIMIT 5000") suspend fun getAuditEvents(): List<EventEntity>
 }

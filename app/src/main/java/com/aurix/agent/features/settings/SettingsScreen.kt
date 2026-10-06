@@ -49,6 +49,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurix.agent.core.ai.routing.ProviderEntry
 import com.aurix.agent.core.voice.WakeWordService
+import com.aurix.agent.features.missions.shareFile
 import com.aurix.agent.core.tools.screen.AurixAccessibilityService
 import com.aurix.agent.core.tools.storage.storageAccessGranted
 import com.aurix.agent.core.ai.routing.RoutingPolicy
@@ -89,20 +90,20 @@ fun SettingsScreen(onBack: () -> Unit, vm: SettingsViewModel = hiltViewModel()) 
                         key, { key = it }, singleLine = true, modifier = Modifier.weight(1f),
                         label = { Text("Paste API key") }, visualTransformation = PasswordVisualTransformation(),
                     )
-                    Button(onClick = { vm.addKey(key, custom); key = "" }, enabled = key.isNotBlank() && !ui.busy) { Text(if (ui.busy) "…" else "Add") }
+                    Button(onClick = { vm.addKey(key, custom); key = "" }, enabled = (key.isNotBlank() || custom.isNotBlank()) && !ui.busy) { Text(if (ui.busy) "…" else "Add") }
                 }
             }
             item { message?.let { Text(it, color = cs.tertiary, style = MaterialTheme.typography.bodySmall) } }
             items(ui.providers, key = { it.id }) { p -> ProviderBlock(p, status, vm) }
             item { VoiceSection(ui, vm) }
-            item { ApprovalAndPermissions(ui.strictApprovals) { vm.setStrict(it) } }
+            item { ApprovalAndPermissions(ui.strictApprovals, ui.alwaysAllowed, { vm.revokeAlways(it) }) { vm.setStrict(it) } }
             item { TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Advanced ▾" else "Advanced ▸") } }
             if (advanced) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             custom, { custom = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Custom base URL (only for other OpenAI-compatible providers)") },
+                            label = { Text("Custom base URL (other providers, or a local model e.g. http://192.168.1.5:11434/v1 — then leave the key empty)") },
                         )
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Switch(checked = ui.policy == RoutingPolicy.BALANCED, onCheckedChange = { vm.setSaveCost(it) })
@@ -117,6 +118,8 @@ fun SettingsScreen(onBack: () -> Unit, vm: SettingsViewModel = hiltViewModel()) 
                             OutlinedButton(onClick = { vm.setBudget(budget.toLongOrNull() ?: 0L) }) { Text("Set") }
                         }
                         Text("Used today: ${ui.todayTokens} tokens", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                        val ctxA = androidx.compose.ui.platform.LocalContext.current
+                        OutlinedButton(onClick = { vm.exportAudit { f -> shareFile(ctxA, f) } }) { Text("Export audit log (CSV)") }
                     }
                 }
             }
@@ -130,7 +133,7 @@ private fun ProviderBlock(p: ProviderEntry, status: Map<String, String>, vm: Set
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(p.name, fontWeight = FontWeight.Bold)
-            Text("Auto-selected · best: ${p.strongModel} · fast: ${p.fastModel}", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            Text((if (p.local) "Local server · " else "") + "Auto-selected · best: ${p.strongModel} · fast: ${p.fastModel}", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             p.keys.forEach { k ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -140,7 +143,10 @@ private fun ProviderBlock(p: ProviderEntry, status: Map<String, String>, vm: Set
                     TextButton(onClick = { vm.removeKey(p.id, k.id) }) { Text("Remove") }
                 }
             }
-            OutlinedButton(onClick = { vm.recheck(p.id) }) { Text("Re-check models") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { vm.recheck(p.id) }) { Text("Re-check models") }
+                if (p.local) TextButton(onClick = { vm.removeProvider(p.id) }) { Text("Remove") }
+            }
         }
     }
 }
@@ -156,7 +162,7 @@ private val PERMS = listOf(
 )
 
 @Composable
-private fun ApprovalAndPermissions(strict: Boolean, onStrict: (Boolean) -> Unit) {
+private fun ApprovalAndPermissions(strict: Boolean, always: List<String>, onRevoke: (String) -> Unit, onStrict: (Boolean) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val ctx = LocalContext.current
     var tick by remember { mutableStateOf(0) }
@@ -167,6 +173,12 @@ private fun ApprovalAndPermissions(strict: Boolean, onStrict: (Boolean) -> Unit)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Switch(checked = strict, onCheckedChange = onStrict)
             Text("Strict: ask before every phone action (otherwise only SMS, calls and other sensitive actions ask)", style = MaterialTheme.typography.bodySmall)
+        }
+        always.forEach { t ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Always allowed: $t", style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { onRevoke(t) }) { Text("Revoke") }
+            }
         }
         PERMS.forEach { p ->
             val granted = remember(tick) { ContextCompat.checkSelfPermission(ctx, p.permission) == PackageManager.PERMISSION_GRANTED }

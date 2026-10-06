@@ -2,4 +2,5 @@
 <paths>
     <files-path name="workspace" path="workspace/" />
     <external-path name="shared" path="." />
+    <cache-path name="audit" path="audit/" />
 </paths>

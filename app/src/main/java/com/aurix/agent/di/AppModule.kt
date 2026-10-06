@@ -42,12 +42,14 @@ object AppModule {
     fun provideDb(@ApplicationContext c: Context): AppDatabase =
         Room.databaseBuilder(c, AppDatabase::class.java, "aurix.db")
             .fallbackToDestructiveMigrationFrom(1) // v1 (Phase 1 test data) only; later versions get real migrations
+            .addMigrations(*com.aurix.agent.core.mission.Migrations.ALL)
             .build()
 
     @Provides fun provideDao(db: AppDatabase): MissionDao = db.missionDao()
 
     @Provides @Singleton
     fun provideHttp(): OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor(com.aurix.agent.core.net.CleartextGuard)
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
         .callTimeout(120, TimeUnit.SECONDS)

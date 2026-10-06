@@ -204,7 +204,7 @@ private class StorageDeleteTool(ctx: Context) : StorageTool(ctx) {
     override val description = "Permanently delete files/folders (always asks the user first). Use for 'delete photos/files'. Not reversible."
     override val inputSchema = """{"paths":["Download/old.zip","DCIM/Camera/IMG_1.jpg"]}"""
     override val outputSchema = "count deleted"
-    override val risk = RiskLevel.HIGH
+    override val risk = RiskLevel.CRITICAL
     override fun describe(input: JSONObject): String {
         val p = pathsOf(input)
         val size = p.mapNotNull { safeResolve(it) }.filter { it.exists() }.sumOf { if (it.isFile) it.length() else it.walkTopDown().filter { f -> f.isFile }.take(5000).sumOf { f -> f.length() } }

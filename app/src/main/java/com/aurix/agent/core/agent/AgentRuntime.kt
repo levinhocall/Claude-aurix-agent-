@@ -13,7 +13,10 @@ import com.aurix.agent.core.mission.MissionEntity
 import com.aurix.agent.core.mission.MissionStatus
 import com.aurix.agent.core.mission.StepEntity
 import com.aurix.agent.core.mission.StepStatus
+import com.aurix.agent.core.tools.RiskLevel
+import com.aurix.agent.core.tools.ToolErrorType
 import com.aurix.agent.core.tools.ToolExecutor
+import com.aurix.agent.core.tools.ToolResult
 import com.aurix.agent.core.tools.ToolRegistry
 import com.aurix.agent.core.tools.Workspace
 import kotlinx.coroutines.CancellationException
@@ -74,7 +77,15 @@ class AgentRuntime @Inject constructor(
             stopRequests.remove(missionId)
             r.m = save(r.m.copy(status = MissionStatus.RUNNING, error = null, currentAction = "Starting"))
             if (wasPaused) events.emit(missionId, AgentEventType.MISSION_RESUMED)
-            if (dao.getSteps(missionId).isEmpty()) plan(r)
+            if (dao.getSteps(missionId).isEmpty()) {
+                val cmd = IntentRouter.route(r.m.objective)
+                if (cmd != null && runLocal(r, cmd)) return
+                if (!ai.hasProvider()) throw StopMission(
+                    MissionStatus.FAILED,
+                    "This request needs an AI model. Add an API key or a local model in Settings. (Simple commands like flashlight, alarm, timer, volume, battery, open app work without one.)",
+                )
+                plan(r)
+            }
             execute(r)
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
@@ -173,23 +184,12 @@ class AgentRuntime @Inject constructor(
                     recover(r, steps, step, attempt, "Loop detected: identical tool call repeated")
                     return
                 }
-                val tool = registry.get(name)
-                var approved = tool == null || tool.riskFor(input) != com.aurix.agent.core.tools.RiskLevel.HIGH
-                if (tool != null && approvals.needsApproval(tool, input)) {
-                    r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_APPROVAL, currentAction = "Waiting for your approval: $name"))
-                    notifier.approvalNeeded(r.m, tool.describe(input))
-                    val decision = approvals.request(id, tool, name, input, say)
-                    r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = step.title))
-                    if (decision == Decision.TIMED_OUT) throw StopMission(MissionStatus.PAUSED, "Approval timed out. Tap Resume to ask again.")
-                    if (decision == Decision.DENIED) {
-                        scratch.append("\n[#").append(calls).append(' ').append(name).append("] -> ERROR PERMISSION_REQUIRED\nThe user DENIED this action. Do not retry it; use another approach or finish with status blocked.\n")
-                        continue
-                    }
-                    approved = true
+                val outcome = gatedExecute(r, step.idx, step.title, name, input, say)
+                if (outcome is ToolOutcome.Denied) {
+                    scratch.append("\n[#").append(calls).append(' ').append(name).append("] -> ERROR PERMISSION_REQUIRED\nThe user DENIED this action. Do not retry it; use another approach or finish with status blocked.\n")
+                    continue
                 }
-                r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_TOOL, currentAction = "Using $name"))
-                val res = tools.execute(id, step.idx, name, input, approved)
-                r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = step.title))
+                val res = (outcome as ToolOutcome.Ran).res
                 scratch.append("\n[#").append(calls).append(' ').append(name).append(' ').append(input.toString().take(300)).append("] -> ")
                 scratch.append(if (res.ok) "OK\n" else "ERROR ${res.errorType}\n").append(res.output.take(1800)).append('\n')
                 if (scratch.length > 6000) scratch.delete(0, scratch.length - 6000)
@@ -209,6 +209,67 @@ class AgentRuntime @Inject constructor(
                 recover(r, steps, step, attempt, result.ifBlank { "Step blocked" })
             }
             return
+        }
+    }
+
+    // ---------------------------------------------------------------- tool gate (approval -> execute)
+    private sealed interface ToolOutcome {
+        class Ran(val res: ToolResult) : ToolOutcome
+        object Denied : ToolOutcome
+    }
+
+    private suspend fun gatedExecute(r: Run, stepIdx: Int, actionTitle: String, name: String, input: JSONObject, say: String): ToolOutcome {
+        val id = r.m.id
+        val tool = registry.get(name)
+        var approved = tool == null || tool.riskFor(input).ordinal < RiskLevel.HIGH.ordinal
+        if (tool != null && approvals.needsApproval(tool, input)) {
+            r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_APPROVAL, currentAction = "Waiting for your approval: $name"))
+            notifier.approvalNeeded(r.m, tool.describe(input))
+            val decision = approvals.request(id, tool, name, input, say)
+            r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = actionTitle))
+            if (decision == Decision.TIMED_OUT) throw StopMission(MissionStatus.PAUSED, "Approval timed out. Tap Resume to ask again.")
+            if (decision == Decision.DENIED) return ToolOutcome.Denied
+            approved = true
+        }
+        r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_TOOL, currentAction = "Using $name"))
+        val res = tools.execute(id, stepIdx, name, input, approved)
+        r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = actionTitle))
+        return ToolOutcome.Ran(res)
+    }
+
+    // ---------------------------------------------------------------- local (no AI) path
+    /** Simple phone commands run straight through the same approval/executor path: no model call, no key, no internet. Returns false to hand over to the AI planner. */
+    private suspend fun runLocal(r: Run, cmd: RoutedCommand): Boolean {
+        val id = r.m.id
+        val title = "${cmd.title} [${cmd.tool}]"
+        dao.upsertSteps(listOf(StepEntity(id, 0, title, StepStatus.RUNNING, null, 1)))
+        r.m = save(r.m.copy(totalSteps = 1, currentStep = 0, currentAction = cmd.title))
+        events.emit(id, AgentEventType.PLAN_CREATED, "1 step (local, no AI needed)")
+        return when (val o = gatedExecute(r, 0, cmd.title, cmd.tool, cmd.input, "")) {
+            is ToolOutcome.Denied -> {
+                dao.upsertSteps(listOf(StepEntity(id, 0, title, StepStatus.FAILED, "Denied by the user", 1)))
+                r.m = save(r.m.copy(finalResult = "Okay, I did not do it."))
+                end(id, MissionStatus.COMPLETED, "Completed", null)
+                true
+            }
+            is ToolOutcome.Ran -> {
+                val first = o.res.output.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
+                if (o.res.ok) {
+                    dao.upsertSteps(listOf(StepEntity(id, 0, title, StepStatus.DONE, o.res.output.take(300), 1)))
+                    r.m = save(r.m.copy(currentStep = 1, finalResult = first))
+                    end(id, MissionStatus.COMPLETED, "Completed", null)
+                    true
+                } else if (o.res.errorType == ToolErrorType.PERMISSION_REQUIRED || !ai.hasProvider()) {
+                    dao.upsertSteps(listOf(StepEntity(id, 0, title, StepStatus.FAILED, o.res.output.take(300), 1)))
+                    r.m = save(r.m.copy(finalResult = first))
+                    end(id, MissionStatus.FAILED, "Failed", "${o.res.errorType}: ${first.take(200)}")
+                    true
+                } else {
+                    events.emit(id, AgentEventType.RECOVERY_STARTED, "Local command failed (${o.res.errorType}); asking the AI planner")
+                    dao.deleteUnfinishedSteps(id)
+                    false
+                }
+            }
         }
     }
 

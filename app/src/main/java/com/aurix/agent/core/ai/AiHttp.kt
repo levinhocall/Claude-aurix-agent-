@@ -11,7 +11,7 @@ import java.io.IOException
 import java.net.SocketTimeoutException
 
 internal fun redactSecret(text: String, secret: String): String =
-    text.replace(secret, "***").replace(Regex("(sk-|AIza|gsk_)[A-Za-z0-9_\\-]{6,}"), "***")
+    (if (secret.isBlank()) text else text.replace(secret, "***")).replace(Regex("(sk-|AIza|gsk_)[A-Za-z0-9_\\-]{6,}"), "***")
 
 internal fun mapHttpError(code: Int, retryAfter: String?, body: String, secret: String): AiError {
     val parsed = try { JSONObject(body).optJSONObject("error")?.optString("message") } catch (e: Exception) { null }

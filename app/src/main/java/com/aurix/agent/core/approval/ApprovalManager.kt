@@ -6,6 +6,7 @@ import com.aurix.agent.core.mission.MissionDao
 import com.aurix.agent.core.security.SecureSettings
 import com.aurix.agent.core.tools.RiskLevel
 import com.aurix.agent.core.tools.Tool
+import com.aurix.agent.core.tools.ToolRegistry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -18,7 +19,7 @@ enum class PermissionMode { STANDARD, STRICT }
 enum class Decision { APPROVED, DENIED, TIMED_OUT }
 
 fun needsApproval(risk: RiskLevel, mode: PermissionMode): Boolean = when (risk) {
-    RiskLevel.HIGH -> true
+    RiskLevel.HIGH, RiskLevel.CRITICAL -> true
     RiskLevel.MEDIUM -> mode == PermissionMode.STRICT
     RiskLevel.LOW -> false
 }
@@ -33,6 +34,8 @@ class AgentSettings @Inject constructor(private val secure: SecureSettings) {
 
     fun userName(): String = secure.getString("user_name").orEmpty()
     fun setUserName(n: String) { secure.putString("user_name", n.trim().take(30)) }
+    fun alwaysAllowed(): Set<String> = secure.getString("always_allow").orEmpty().split(',').filter { it.isNotBlank() }.toSet()
+    fun setAlwaysAllowed(s: Set<String>) { secure.putString("always_allow", s.joinToString(",")) }
     fun wakeEnabled(): Boolean = secure.getString("wake_enabled") == "1"
     fun setWakeEnabled(on: Boolean) { secure.putString("wake_enabled", if (on) "1" else "0") }
 }
@@ -46,10 +49,16 @@ class ApprovalManager @Inject constructor(
     private val dao: MissionDao,
     private val events: AgentEvents,
     private val settings: AgentSettings,
+    private val registry: ToolRegistry,
 ) {
     private val waiters = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
 
-    fun needsApproval(tool: Tool, input: JSONObject): Boolean = needsApproval(tool.riskFor(input), settings.mode())
+    /** HIGH actions the user chose to "always allow" skip the prompt; CRITICAL ones never can. */
+    fun needsApproval(tool: Tool, input: JSONObject): Boolean {
+        val risk = tool.riskFor(input)
+        if (risk == RiskLevel.HIGH && tool.name in settings.alwaysAllowed()) return false
+        return needsApproval(risk, settings.mode())
+    }
 
     suspend fun request(missionId: String, tool: Tool, name: String, input: JSONObject, reason: String): Decision {
         val key = approvalKey(name, input)
@@ -65,7 +74,7 @@ class ApprovalManager @Inject constructor(
             if (!asked) {
                 events.emit(
                     missionId, AgentEventType.APPROVAL_REQUESTED,
-                    JSONObject().put("key", key).put("tool", name).put("summary", tool.describe(input).take(200)).put("reason", reason.take(120)).toString(),
+                    JSONObject().put("key", key).put("tool", name).put("summary", tool.describe(input).take(200)).put("reason", reason.take(120)).put("risk", tool.riskFor(input).name).toString(),
                 )
             }
             return when (withTimeoutOrNull(TIMEOUT_MS) { waiter.await() }) {
@@ -78,7 +87,11 @@ class ApprovalManager @Inject constructor(
         }
     }
 
-    suspend fun resolve(missionId: String, key: String, allow: Boolean) {
+    suspend fun resolve(missionId: String, key: String, allow: Boolean, alwaysTool: String? = null) {
+        if (allow && alwaysTool != null) {
+            val t = registry.get(alwaysTool)
+            if (t != null && t.risk == RiskLevel.HIGH) settings.setAlwaysAllowed(settings.alwaysAllowed() + alwaysTool)
+        }
         events.emit(missionId, if (allow) AgentEventType.APPROVAL_GRANTED else AgentEventType.APPROVAL_DENIED, "$key|${if (allow) "allowed" else "denied"}")
         waiters["$missionId:$key"]?.complete(allow)
     }

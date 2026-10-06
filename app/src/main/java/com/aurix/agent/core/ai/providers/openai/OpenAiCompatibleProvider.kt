@@ -24,7 +24,7 @@ class OpenAiCompatibleProvider(
         } else {
             payload.put("max_tokens", request.maxTokens).put("temperature", request.temperature)
         }
-        val json = client.postJson(baseUrl.trimEnd('/') + "/chat/completions", mapOf("Authorization" to "Bearer $apiKey"), payload, apiKey)
+        val json = client.postJson(baseUrl.trimEnd('/') + "/chat/completions", if (apiKey.isBlank()) emptyMap() else mapOf("Authorization" to "Bearer $apiKey"), payload, apiKey)
         val content = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
         if (content.isBlank()) throw AiError(AiErrorType.MODEL_ERROR, "Empty model response")
         val u = json.optJSONObject("usage")

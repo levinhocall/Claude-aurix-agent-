@@ -49,6 +49,16 @@ object ModelPicker {
         return Pick(strong, fast)
     }
 
+    /** Local servers (Ollama etc.): biggest model = strong, smallest = fast. Size comes from names like llama3.1:8b. */
+    fun pickLocal(rawIds: List<String>): Pick? {
+        val ids = rawIds.filter { it.isNotBlank() && !Regex("embed|rerank|whisper|tts|clip|bge", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+        if (ids.isEmpty()) return null
+        fun size(id: String) = Regex("(\\d+(?:\\.\\d+)?)\\s*b\\b", RegexOption.IGNORE_CASE).find(id.replace(':', '-'))?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+        val strong = ids.maxByOrNull { size(it) } ?: ids.first()
+        val fast = ids.filter { size(it) > 0 }.minByOrNull { size(it) } ?: strong
+        return Pick(strong, fast)
+    }
+
     private val vendors = listOf("anthropic/", "openai/", "google/", "x-ai/", "deepseek/", "mistralai/", "meta-llama/", "qwen/")
 
     /** OpenRouter lists hundreds of models incl. variants (":batch", ":free", previews). Prefer main-line chat models from major vendors. */

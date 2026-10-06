@@ -3,6 +3,7 @@ package com.aurix.agent.core.ai
 import com.aurix.agent.core.ai.providers.anthropic.AnthropicProvider
 import com.aurix.agent.core.ai.providers.openai.OpenAiCompatibleProvider
 import com.aurix.agent.core.ai.routing.Failover
+import com.aurix.agent.core.ai.routing.KeyEntry
 import com.aurix.agent.core.ai.routing.KeyPool
 import com.aurix.agent.core.ai.routing.ModelRouter
 import com.aurix.agent.core.ai.routing.ProviderEntry
@@ -33,6 +34,8 @@ class AiProviderManager @Inject constructor(
 
     suspend fun complete(request: AiRequest): AiResponse = failover.complete(request)
 
+    fun hasProvider(): Boolean = store.providers().any { it.enabled && (it.local || it.keys.isNotEmpty()) }
+
     private fun adapterFor(p: ProviderEntry): AiProvider = when (p.type) {
         ProviderType.OPENAI_COMPATIBLE -> OpenAiCompatibleProvider(p.id, p.baseUrl, client)
         ProviderType.ANTHROPIC -> AnthropicProvider(p.id, p.baseUrl, client)
@@ -41,12 +44,12 @@ class AiProviderManager @Inject constructor(
     /** Pings every key of one provider with a tiny request; re-enables keys that work. */
     suspend fun test(providerId: String): String {
         val p = store.providers().firstOrNull { it.id == providerId } ?: return "Provider not found"
-        if (p.keys.isEmpty()) return "Add an API key first"
+        if (p.keys.isEmpty() && !p.local) return "Add an API key first"
         val probe = AiRequest(emptyList(), purpose = "test")
         val model = ModelRouter.modelFor(p, RoutingPolicy.ECONOMY, probe)
         if (model.isBlank()) return "Set a model name first"
         val out = StringBuilder()
-        for (k in p.keys) {
+        for (k in if (p.local) listOf(KeyEntry("local-${p.id}", "local", "")) else p.keys) {
             pool.reset(k.id)
             val t0 = System.currentTimeMillis()
             val line = try {

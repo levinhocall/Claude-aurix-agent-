@@ -39,7 +39,7 @@ class HomeViewModel @Inject constructor(
     private val _userName = MutableStateFlow("")
     val userName: StateFlow<String> = _userName.asStateFlow()
 
-    fun refreshKey() { viewModelScope.launch(Dispatchers.IO) { _hasKey.value = store.providers().any { it.keys.isNotEmpty() }; _userName.value = agentSettings.userName() } }
+    fun refreshKey() { viewModelScope.launch(Dispatchers.IO) { _hasKey.value = store.providers().any { it.local || it.keys.isNotEmpty() }; _userName.value = agentSettings.userName() } }
 
     fun submit(objective: String, onCreated: (String) -> Unit) {
         viewModelScope.launch { onCreated(manager.create(objective.trim())) }
@@ -75,7 +75,9 @@ class TranscriptViewModel @Inject constructor(
         viewModelScope.launch { onCreated(manager.create(m.objective)) }
     }
     fun answer(key: String, text: String) { viewModelScope.launch { questions.answer(id, key, text) } }
-    fun decide(key: String, allow: Boolean) { viewModelScope.launch { approvals.resolve(id, key, allow) } }
+    fun decide(key: String, allow: Boolean, tool: String? = null, always: Boolean = false) {
+        viewModelScope.launch { approvals.resolve(id, key, allow, if (always) tool else null) }
+    }
     fun pause() = manager.pause(id)
     fun resume() = manager.resume(id)
     fun cancel() = manager.cancel(id)

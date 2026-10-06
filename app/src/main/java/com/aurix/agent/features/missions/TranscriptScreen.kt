@@ -187,13 +187,14 @@ private fun RenderItem(item: TItem, vm: TranscriptViewModel, ctx: android.conten
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("⚠  Approval needed", style = MaterialTheme.typography.titleSmall, color = cs.tertiary)
+                Text(if (item.risk == "CRITICAL") "⚠  Critical action — approval needed" else "⚠  Approval needed", style = MaterialTheme.typography.titleSmall, color = if (item.risk == "CRITICAL") cs.error else cs.tertiary)
                 Text(item.summary, fontFamily = Mono, fontSize = 13.sp)
                 if (item.reason.isNotBlank()) Text(item.reason, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { vm.decide(item.approvalKey, false) }, modifier = Modifier.weight(1f)) { Text("Deny") }
                     Button(onClick = { vm.decide(item.approvalKey, true) }, modifier = Modifier.weight(1f)) { Text("Allow") }
                 }
+                if (item.risk == "HIGH") TextButton(onClick = { vm.decide(item.approvalKey, true, item.tool, true) }) { Text("Always allow ${toolLabel(item.tool)}", color = cs.onSurfaceVariant) }
             }
         }
         is QuestionCard -> Surface(

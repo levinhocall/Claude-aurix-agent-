@@ -2,7 +2,7 @@ package com.aurix.agent.core.tools
 
 import org.json.JSONObject
 
-enum class RiskLevel { LOW, MEDIUM, HIGH }
+enum class RiskLevel { LOW, MEDIUM, HIGH, CRITICAL }
 
 enum class ToolErrorType {
     NETWORK_ERROR, AUTH_ERROR, RATE_LIMIT, TIMEOUT, TOOL_ERROR, INVALID_INPUT, MODEL_ERROR, PERMISSION_REQUIRED, UNKNOWN_ERROR

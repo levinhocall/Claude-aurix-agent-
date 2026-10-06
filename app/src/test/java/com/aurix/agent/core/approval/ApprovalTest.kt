@@ -35,3 +35,16 @@ class ApprovalTest {
         assertNull(normalizePhone("call me maybe"))
     }
 }
+
+class CriticalRiskTest {
+    @Test fun criticalAlwaysAsks() {
+        assertTrue(needsApproval(RiskLevel.CRITICAL, PermissionMode.STANDARD))
+        assertTrue(needsApproval(RiskLevel.CRITICAL, PermissionMode.STRICT))
+    }
+
+    @Test fun moneyAppsAreCriticalSettingsIsHigh() {
+        assertEquals(RiskLevel.CRITICAL, com.aurix.agent.core.tools.screen.ScreenGuard.riskFor("com.phonepe.app", RiskLevel.MEDIUM))
+        assertEquals(RiskLevel.HIGH, com.aurix.agent.core.tools.screen.ScreenGuard.riskFor("com.android.settings", RiskLevel.MEDIUM))
+        assertEquals(RiskLevel.MEDIUM, com.aurix.agent.core.tools.screen.ScreenGuard.riskFor("com.google.android.youtube", RiskLevel.MEDIUM))
+    }
+}

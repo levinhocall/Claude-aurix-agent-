@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aurix.agent.core.ai.AiError
 import com.aurix.agent.core.approval.AgentSettings
+import com.aurix.agent.core.audit.AuditExporter
 import com.aurix.agent.core.approval.PermissionMode
 import com.aurix.agent.core.ai.AiErrorType
 import com.aurix.agent.core.ai.routing.KeyDetector
@@ -32,6 +33,7 @@ data class SettingsState(
     val strictApprovals: Boolean = false,
     val userName: String = "",
     val wakeEnabled: Boolean = false,
+    val alwaysAllowed: List<String> = emptyList(),
 )
 
 @HiltViewModel
@@ -41,6 +43,7 @@ class SettingsViewModel @Inject constructor(
     private val usage: UsageTracker,
     private val discovery: ModelDiscovery,
     private val agentSettings: AgentSettings,
+    private val auditExporter: AuditExporter,
 ) : ViewModel() {
     private val _ui = MutableStateFlow(SettingsState())
     val ui: StateFlow<SettingsState> = _ui.asStateFlow()
@@ -52,7 +55,7 @@ class SettingsViewModel @Inject constructor(
     init { viewModelScope.launch(Dispatchers.IO) { reload() } }
 
     private fun reload(busy: Boolean = _ui.value.busy) {
-        _ui.value = SettingsState(store.providers(), store.policy(), usage.budget(), usage.today(), busy, agentSettings.mode() == PermissionMode.STRICT, agentSettings.userName(), agentSettings.wakeEnabled())
+        _ui.value = SettingsState(store.providers(), store.policy(), usage.budget(), usage.today(), busy, agentSettings.mode() == PermissionMode.STRICT, agentSettings.userName(), agentSettings.wakeEnabled(), agentSettings.alwaysAllowed().sorted())
         refreshStatus()
     }
 
@@ -66,13 +69,13 @@ class SettingsViewModel @Inject constructor(
     /** Paste a key -> provider detected, key validated, best models chosen automatically. */
     fun addKey(secretRaw: String, customBaseUrl: String) {
         val secret = secretRaw.trim()
-        if (secret.isEmpty()) return
+        if (secret.isEmpty() && customBaseUrl.isBlank()) return
         viewModelScope.launch(Dispatchers.IO) {
             _ui.value = _ui.value.copy(busy = true)
             _message.value = "Checking key…"
             val preset = KeyDetector.detect(secret, customBaseUrl)
             if (preset == null) {
-                _message.value = "Couldn't recognise this key format. Open Advanced and enter the provider's base URL (https://…), then add it again."
+                _message.value = "Couldn't recognise this. For other providers open Advanced and enter the base URL (https://…). For a local model on your Wi-Fi enter http://<pc-ip>:11434/v1 and leave the key empty."
                 _ui.value = _ui.value.copy(busy = false)
                 return@launch
             }
@@ -80,11 +83,11 @@ class SettingsViewModel @Inject constructor(
                 val (pick, note) = discovery.pick(preset, secret)
                 val list = store.providers()
                 val existing = list.firstOrNull { it.baseUrl.trimEnd('/') == preset.baseUrl.trimEnd('/') && it.type == preset.type }
-                val key = KeyEntry(UUID.randomUUID().toString(), "Key ${(existing?.keys?.size ?: 0) + 1}", secret)
+                val newKeys = if (preset.local) emptyList() else listOf(KeyEntry(UUID.randomUUID().toString(), "Key ${(existing?.keys?.size ?: 0) + 1}", secret))
                 val updated = if (existing != null) {
-                    list.map { if (it.id == existing.id) it.copy(fastModel = pick.fast, strongModel = pick.strong, keys = it.keys + key) else it }
+                    list.map { if (it.id == existing.id) it.copy(fastModel = pick.fast, strongModel = pick.strong, keys = it.keys + newKeys, local = it.local || preset.local) else it }
                 } else {
-                    list + ProviderEntry(UUID.randomUUID().toString(), preset.type, preset.name, preset.baseUrl, pick.fast, pick.strong, keys = listOf(key))
+                    list + ProviderEntry(UUID.randomUUID().toString(), preset.type, preset.name, preset.baseUrl, pick.fast, pick.strong, keys = newKeys, local = preset.local)
                 }
                 store.save(updated)
                 _message.value = "✓ ${preset.name} connected — best model: ${pick.strong}" + (note?.let { "\n$it" } ?: "")
@@ -98,7 +101,7 @@ class SettingsViewModel @Inject constructor(
 
     fun removeKey(providerId: String, keyId: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val list = store.providers().map { p -> if (p.id == providerId) p.copy(keys = p.keys.filter { it.id != keyId }) else p }.filter { it.keys.isNotEmpty() }
+            val list = store.providers().map { p -> if (p.id == providerId) p.copy(keys = p.keys.filter { it.id != keyId }) else p }.filter { it.keys.isNotEmpty() || it.local }
             store.save(list)
             reload()
         }
@@ -108,12 +111,13 @@ class SettingsViewModel @Inject constructor(
     fun recheck(providerId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val p = store.providers().firstOrNull { it.id == providerId } ?: return@launch
-            val k = p.keys.firstOrNull() ?: return@launch
+            val secretForCheck = p.keys.firstOrNull()?.secret ?: if (p.local) "" else return@launch
             _message.value = "Re-checking ${p.name}…"
             try {
                 p.keys.forEach { pool.reset(it.id) }
-                val ids = discovery.listModels(p.type, p.baseUrl, k.secret)
-                val pick = com.aurix.agent.core.ai.routing.ModelPicker.pick(p.type, ids, p.strongModel, p.fastModel, p.baseUrl)
+                val ids = discovery.listModels(p.type, p.baseUrl, secretForCheck)
+                val pick = (if (p.local) com.aurix.agent.core.ai.routing.ModelPicker.pickLocal(ids) else null)
+                    ?: com.aurix.agent.core.ai.routing.ModelPicker.pick(p.type, ids, p.strongModel, p.fastModel, p.baseUrl)
                 store.save(store.providers().map { if (it.id == p.id) it.copy(strongModel = pick.strong, fastModel = pick.fast) else it })
                 _message.value = "✓ ${p.name} OK — best model: ${pick.strong}"
             } catch (e: AiError) {
@@ -123,11 +127,26 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun removeProvider(providerId: String) {
+        viewModelScope.launch(Dispatchers.IO) { store.save(store.providers().filter { it.id != providerId }); reload() }
+    }
+
     fun setSaveCost(on: Boolean) {
         viewModelScope.launch(Dispatchers.IO) { store.setPolicy(if (on) RoutingPolicy.BALANCED else RoutingPolicy.QUALITY); reload() }
     }
 
     fun setStrict(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setMode(if (on) PermissionMode.STRICT else PermissionMode.STANDARD); reload() } }
+
+    fun revokeAlways(tool: String) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setAlwaysAllowed(agentSettings.alwaysAllowed() - tool); reload() } }
+
+    fun exportAudit(onReady: (java.io.File) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val f = auditExporter.export()
+                kotlinx.coroutines.withContext(Dispatchers.Main) { onReady(f) }
+            } catch (e: Exception) { _message.value = "Could not export the audit log: ${e.message?.take(80)}" }
+        }
+    }
 
     fun setUserName(n: String) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setUserName(n); reload() } }
     fun setWake(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setWakeEnabled(on); reload() } }

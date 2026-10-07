@@ -37,7 +37,7 @@ object IntentRouter {
 
     // ------------------------------------------------------------ message / call a contact by name (resolved on the phone, never guessed)
     private val bareVerbs = setOf("bhejo", "bhej", "karo", "kro", "send", "ki", "ke", "ye", "bhej do", "kar do")
-    private val smsHi = Regex("^(?:please\\s+)?(.+?)\\s+ko\\s+(whatsapp\\s+(?:pe\\s+|par\\s+)?)?(?:message|msg|sms|text)\\s*(?:send\\s+)?(?:bhejo|bhej\\s+do|bhej|karo|kro|kar\\s+do|send\\s+karo|send\\s+kro|send)?\\s*(?:ki|ke\\s+liye|ye)?\\s*(.+)$", RegexOption.IGNORE_CASE)
+    private val smsHi = Regex("^(?:please\\s+)?(.+?)\\s+ko\\s+(whatsapp\\s+(?:pe\\s+|par\\s+)?)?(?:message|msg|sms|text)\\s*(?:send\\s+)?(?:(?:bhejo|bhej\\s+do|bhej|karo|kro|kar\\s+do|send\\s+karo|send\\s+kro|send)(?=\\s|$))?\\s*(?:ki|ke\\s+liye|ye)?\\s*(.+)$", RegexOption.IGNORE_CASE)
     private val waHi = Regex("^whatsapp\\s+(?:pe|par|me|mein)\\s+(.+?)\\s+ko\\s+(?:bol|bolo|bhejo|message|msg|bhej\\s+do)(?:\\s+(?:ki|ke))?\\s+(.+)$", RegexOption.IGNORE_CASE)
     private val enMarked = Regex("^(?:send\\s+)?(?:a\\s+)?(whatsapp\\s+)?(?:message|msg|sms|text)\\s+(?:to\\s+)?(\\p{L}+(?:\\s+\\p{L}+)?)\\s+(?:that|saying|:)\\s*(.+)$", RegexOption.IGNORE_CASE)
     private val enPlain = Regex("^(?:send\\s+)?(whatsapp\\s+)?(?:message|msg|text)\\s+(?:to\\s+)?(\\p{L}+)\\s+(.+)$", RegexOption.IGNORE_CASE)
@@ -53,7 +53,7 @@ object IntentRouter {
     private fun message(name: String, text: String, whatsapp: Boolean): RoutedCommand? {
         val n = cleanName(name) ?: return null
         val body = text.trim()
-        if (body.isEmpty() || body.length > 300 || body.lowercase() in bareVerbs) return null
+        if (body.length < 2 || body.length > 300 || body.lowercase() in bareVerbs) return null
         val tool = if (whatsapp) "WHATSAPP_MESSAGE" else "SEND_SMS"
         return RoutedCommand(tool, JSONObject().put("text", body), (if (whatsapp) "WhatsApp " else "Text ") + n, contact = n)
     }

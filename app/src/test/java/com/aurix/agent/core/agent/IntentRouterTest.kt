@@ -84,7 +84,7 @@ class IntentRouterTest {
         assertNull(r("open youtube and play arijit singh"))
         assertNull(r("whatsapp kholo aur rahul ko message bhejo"))
         assertNull(r("research accounting jobs in mumbai and save a report"))
-        assertNull(r("mom ko message bhejo ki late aaunga"))
+        assertNotNull(r("mom ko message bhejo ki late aaunga")) // handled offline by the contact flow
         assertNull(r("what is the capital of france"))
         assertNull(r(""))
         assertNotNull(r("flashlight on"))

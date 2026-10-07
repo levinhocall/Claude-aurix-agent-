@@ -9,7 +9,7 @@ JSON only: {"steps":["step [TOOLS]"]}"""
 {"action":"tool","say":"<few words>","tool":"NAME","input":{...}}  or  {"action":"finish","status":"done" or "blocked","result":"<concise result; keep facts/URLs later steps need>"}
 Tools:
 $catalog${if (others.isNotEmpty()) "\nOther tools (names only): $others" else ""}
-Rules: no native function calling, JSON text only. Never invent facts, URLs, numbers. If a tool fails try another query/tool. Files: FILE_WRITE (append=true for long). Phone-tool OK = request delivered, outcome unconfirmed; say so. If the target is ambiguous (several/inexact contacts, unclear request) use ASK_USER, never guess. For SEND_SMS include "to" (contact name). On screen tasks act on the returned screen state (no need to re-read); use SCREEN_READ only if unsure."""
+Rules: act on the user's intent directly and also do the obvious implied follow-up (never ask the user for confirmation yourself; the app handles approvals). No native function calling, JSON text only. Never invent facts, URLs, numbers. If a tool fails try another query/tool. Files: FILE_WRITE (append=true for long). Phone-tool OK = request delivered, outcome unconfirmed; say so. If the target is ambiguous (several/inexact contacts, unclear request) use ASK_USER, never guess. For SEND_SMS include "to" (contact name). On screen tasks act on the returned screen state (no need to re-read); use SCREEN_READ only if unsure."""
 
     fun replan(toolNames: String) = """A step failed or was blocked. List the REMAINING steps only, with a different approach. Tools: $toolNames. End each step with [TOOLS]. If impossible, one step that explains what was done and what cannot be.
 JSON only: {"steps":["step [TOOLS]"]}"""

@@ -4,7 +4,7 @@ import com.aurix.agent.core.tools.device.foldText
 import org.json.JSONObject
 import java.util.Calendar
 
-data class RoutedCommand(val tool: String, val input: JSONObject, val title: String, val contact: String? = null)
+data class RoutedCommand(val tool: String, val input: JSONObject, val title: String, val contact: String? = null, val extra: List<Pair<String, JSONObject>> = emptyList())
 
 /**
  * Offline, keyless command router for simple single-action phone commands in English/Hindi/Hinglish.
@@ -22,13 +22,14 @@ object IntentRouter {
         val orig = text.trim()
         if (orig.isEmpty() || orig.length > 400) return null
         contactCommand(orig)?.let { return it }
+        memoryCommand(orig)?.let { return it }
         val raw = orig.lowercase()
         if (raw.length > 100) return null
         val t = foldText(raw)
         val w = t.split(' ').filter { it.isNotEmpty() }
         if (w.isEmpty() || w.size > 12) return null
         if (w.any { it in joiners } || t.contains("uske baad")) return null
-        return flashlight(w) ?: timerOrAlarm(raw, t, w, nowHour) ?: volume(raw, w) ?: brightness(raw, w) ?: vibrate(w) ?: screenKey(t, w) ?: scroll(w) ?: battery(w) ?: networkOrPanel(t, w) ?: deviceInfo(t)
+        return flashlight(w) ?: timerOrAlarm(raw, t, w, nowHour) ?: volume(raw, w) ?: brightness(raw, w) ?: vibrate(w) ?: sosOrMode(t, w) ?: notificationCmd(t, w) ?: screenKey(t, w) ?: scroll(w) ?: battery(w) ?: networkOrPanel(t, w) ?: deviceInfo(t)
             ?: location(t) ?: storage(w) ?: media(w) ?: callNumber(raw) ?: navigate(t, w) ?: playMusic(t, w) ?: openApp(t, w)
     }
 
@@ -102,6 +103,53 @@ object IntentRouter {
     private fun deviceInfo(t: String): RoutedCommand? =
         if (listOf("device info", "phone info", "phone ki info", "system info", "about my phone", "about this phone", "mera phone kaun sa").any { t.contains(it) })
             cmd("DEVICE_INFO", "Device info") else null
+
+    // ------------------------------------------------------------ memory, emergency, modes, notifications
+    private val rememberRx = Regex("^(?:remember(?:\\s+that)?|yaad\\s+rakh(?:na|o)?(?:\\s+ki)?|note\\s+kar(?:o)?(?:\\s+ki)?)\\s+(.+)$", RegexOption.IGNORE_CASE)
+    private val emergencyRx = Regex("^(?:add\\s+|save\\s+)?emergency\\s+contact\\s+(.+?)\\s+(\\+?[0-9][0-9\\s-]{7,14})(?:\\s+(?:add|save)(?:\\s+(?:karo|kro))?)?$", RegexOption.IGNORE_CASE)
+
+    private fun memoryCommand(orig: String): RoutedCommand? {
+        emergencyRx.find(orig)?.let { m ->
+            val name = m.groupValues[1].trim(); val num = m.groupValues[2].replace(Regex("[\\s-]"), "")
+            if (name.length in 1..30) return RoutedCommand("MEMORY_SAVE", JSONObject().put("text", "$name: $num").put("kind", "emergency"), "Save emergency contact $name")
+        }
+        rememberRx.find(orig)?.let { m ->
+            val t = m.groupValues[1].trim()
+            if (t.length in 3..300) return RoutedCommand("MEMORY_SAVE", JSONObject().put("text", t).put("kind", "fact"), "Remember: ${t.take(40)}")
+        }
+        return null
+    }
+
+    private val modes = mapOf(
+        "driving" to listOf("SET_VOLUME" to """{"level":85}""", "BRIGHTNESS" to """{"level":80}"""),
+        "work" to listOf("SET_VOLUME" to """{"level":25}"""),
+        "sleep" to listOf("SET_VOLUME" to """{"level":0}""", "BRIGHTNESS" to """{"level":5}"""),
+        "gaming" to listOf("SET_VOLUME" to """{"level":70}""", "BRIGHTNESS" to """{"level":100}"""),
+        "focus" to listOf("SET_VOLUME" to """{"level":10}"""),
+        "normal" to listOf("SET_VOLUME" to """{"level":50}""", "BRIGHTNESS" to """{"level":60}"""),
+    )
+
+    private fun sosOrMode(t: String, w: List<String>): RoutedCommand? {
+        if (t in setOf("sos", "emergency", "emergency sos", "send sos", "sos bhejo", "emergency hai", "mujhe help chahiye", "help me sos"))
+            return cmd("EMERGENCY_SOS", "Emergency SOS", "call_first" to true)
+        if ("mode" in w && w.size <= 5) {
+            val name = w.firstOrNull { it in modes } ?: if (w.any { it in setOf("off", "band", "normal") }) "normal" else null
+            val acts = modes[name] ?: return null
+            val title = name!!.replaceFirstChar { it.uppercase() } + " mode"
+            return RoutedCommand(acts[0].first, JSONObject(acts[0].second), title, extra = acts.drop(1).map { it.first to JSONObject(it.second) })
+        }
+        return null
+    }
+
+    private fun notificationCmd(t: String, w: List<String>): RoutedCommand? {
+        if ("otp" in w && w.any { it in setOf("kya", "batao", "latest", "last", "read", "padho", "show", "hai", "dikhao", "bata") }) return cmd("NOTIFICATION_OTP", "Latest OTP")
+        if (w.any { it == "missed" } && w.any { it == "call" || it == "calls" }) return cmd("NOTIFICATIONS_LIST", "Missed calls", "kind" to "missed_call")
+        val notif = "notification" in w || "notifications" in w
+        if (!notif) return null
+        if (w.any { it in setOf("clear", "saaf", "hatao", "dismiss") }) return cmd("NOTIFICATIONS_CLEAR", "Clear notifications")
+        if (w.any { it in setOf("padho", "read", "batao", "aaye", "aayi", "summary", "summarize", "kya", "bata") }) return cmd("NOTIFICATIONS_LIST", "Read notifications")
+        return null
+    }
 
     private fun flashlight(w: List<String>): RoutedCommand? {
         val has = w.any { it == "flashlight" || it == "torch" || it == "tourch" || it == "tarch" } || ("flash" in w && "light" in w)

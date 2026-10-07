@@ -15,11 +15,13 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** STANDARD: only HIGH-risk actions ask. STRICT: MEDIUM and HIGH ask. LOW never asks. */
-enum class PermissionMode { STANDARD, STRICT }
+/** JARVIS: routine HIGH actions (SMS, calls, WhatsApp) run without asking; CRITICAL (delete, money, SOS) still confirms. */
+enum class PermissionMode { STANDARD, STRICT, JARVIS }
 enum class Decision { APPROVED, DENIED, TIMED_OUT }
 
 fun needsApproval(risk: RiskLevel, mode: PermissionMode): Boolean = when (risk) {
-    RiskLevel.HIGH, RiskLevel.CRITICAL -> true
+    RiskLevel.CRITICAL -> true
+    RiskLevel.HIGH -> mode != PermissionMode.JARVIS
     RiskLevel.MEDIUM -> mode == PermissionMode.STRICT
     RiskLevel.LOW -> false
 }
@@ -34,6 +36,10 @@ class AgentSettings @Inject constructor(private val secure: SecureSettings) {
 
     fun userName(): String = secure.getString("user_name").orEmpty()
     fun setUserName(n: String) { secure.putString("user_name", n.trim().take(30)) }
+    fun memoryEnabled(): Boolean = secure.getString("memory_enabled") != "0"
+    fun setMemoryEnabled(on: Boolean) { secure.putString("memory_enabled", if (on) "1" else "0") }
+    fun aiSeesNotifications(): Boolean = secure.getString("ai_sees_notifs") == "1"
+    fun setAiSeesNotifications(on: Boolean) { secure.putString("ai_sees_notifs", if (on) "1" else "0") }
     fun alwaysAllowed(): Set<String> = secure.getString("always_allow").orEmpty().split(',').filter { it.isNotBlank() }.toSet()
     fun setAlwaysAllowed(s: Set<String>) { secure.putString("always_allow", s.joinToString(",")) }
     fun wakeEnabled(): Boolean = secure.getString("wake_enabled") == "1"

@@ -6,6 +6,8 @@ import com.aurix.agent.core.ai.AiError
 import com.aurix.agent.core.ai.AiProviderManager
 import com.aurix.agent.core.approval.AgentSettings
 import com.aurix.agent.core.audit.AuditExporter
+import com.aurix.agent.core.memory.MemoryEntity
+import com.aurix.agent.core.memory.MemoryRepository
 import com.aurix.agent.core.approval.PermissionMode
 import com.aurix.agent.core.ai.AiErrorType
 import com.aurix.agent.core.ai.routing.KeyDetector
@@ -35,6 +37,10 @@ data class SettingsState(
     val userName: String = "",
     val wakeEnabled: Boolean = false,
     val alwaysAllowed: List<String> = emptyList(),
+    val jarvis: Boolean = false,
+    val memoryEnabled: Boolean = true,
+    val aiSeesNotifs: Boolean = false,
+    val memories: List<MemoryEntity> = emptyList(),
 )
 
 @HiltViewModel
@@ -46,6 +52,7 @@ class SettingsViewModel @Inject constructor(
     private val agentSettings: AgentSettings,
     private val auditExporter: AuditExporter,
     private val manager: AiProviderManager,
+    private val memoryRepo: MemoryRepository,
 ) : ViewModel() {
     private val _ui = MutableStateFlow(SettingsState())
     val ui: StateFlow<SettingsState> = _ui.asStateFlow()
@@ -57,7 +64,9 @@ class SettingsViewModel @Inject constructor(
     init { viewModelScope.launch(Dispatchers.IO) { reload() } }
 
     private fun reload(busy: Boolean = _ui.value.busy) {
-        _ui.value = SettingsState(store.providers(), store.policy(), usage.budget(), usage.today(), busy, agentSettings.mode() == PermissionMode.STRICT, agentSettings.userName(), agentSettings.wakeEnabled(), agentSettings.alwaysAllowed().sorted())
+        _ui.value = SettingsState(store.providers(), store.policy(), usage.budget(), usage.today(), busy, agentSettings.mode() == PermissionMode.STRICT, agentSettings.userName(), agentSettings.wakeEnabled(), agentSettings.alwaysAllowed().sorted(),
+            agentSettings.mode() == PermissionMode.JARVIS, agentSettings.memoryEnabled(), agentSettings.aiSeesNotifications(),
+            kotlinx.coroutines.runBlocking { memoryRepo.all() })
         refreshStatus()
     }
 
@@ -152,6 +161,12 @@ class SettingsViewModel @Inject constructor(
 
     fun setUserName(n: String) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setUserName(n); reload() } }
     fun setWake(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setWakeEnabled(on); reload() } }
+
+    fun setJarvis(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setMode(if (on) PermissionMode.JARVIS else PermissionMode.STANDARD); reload() } }
+    fun setMemoryEnabled(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setMemoryEnabled(on); reload() } }
+    fun setAiSeesNotifs(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setAiSeesNotifications(on); reload() } }
+    fun deleteMemory(id: Long) { viewModelScope.launch(Dispatchers.IO) { memoryRepo.delete(id); reload() } }
+    fun clearMemories() { viewModelScope.launch(Dispatchers.IO) { memoryRepo.clear(); reload() } }
 
     fun setBudget(v: Long) { viewModelScope.launch(Dispatchers.IO) { usage.setBudget(v); reload() } }
 }

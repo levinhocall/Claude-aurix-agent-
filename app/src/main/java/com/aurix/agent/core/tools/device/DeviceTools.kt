@@ -41,7 +41,7 @@ fun normalizePhone(raw: String): String? {
     return if (Regex("^\\+?[0-9]{6,15}$").matches(s)) s else null
 }
 
-private fun requirePermission(ctx: Context, permission: String, label: String) {
+internal fun requirePermission(ctx: Context, permission: String, label: String) {
     if (ContextCompat.checkSelfPermission(ctx, permission) != PackageManager.PERMISSION_GRANTED)
         throw ToolException(ToolErrorType.PERMISSION_REQUIRED, "$label permission is not granted. Open AURIX → Settings → Phone permissions and grant it.")
 }

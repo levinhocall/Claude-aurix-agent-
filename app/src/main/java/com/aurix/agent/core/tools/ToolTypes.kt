@@ -10,7 +10,8 @@ enum class ToolErrorType {
 
 data class RetryPolicy(val maxAttempts: Int = 1, val backoffMs: Long = 1_000)
 
-data class ToolContext(val missionId: String)
+/** cloud = true when a cloud AI model will read this tool's output (so private data can be withheld). */
+data class ToolContext(val missionId: String, val cloud: Boolean = false)
 
 class ToolException(val type: ToolErrorType, message: String) : Exception(message)
 

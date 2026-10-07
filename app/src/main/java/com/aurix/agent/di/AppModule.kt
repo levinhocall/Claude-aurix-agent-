@@ -5,7 +5,12 @@ import androidx.room.Room
 import com.aurix.agent.core.mission.AppDatabase
 import com.aurix.agent.core.mission.MissionDao
 import com.aurix.agent.core.tools.CalculatorTool
+import com.aurix.agent.core.approval.AgentSettings
 import com.aurix.agent.core.approval.QuestionManager
+import com.aurix.agent.core.memory.MemoryRepository
+import com.aurix.agent.core.memory.MemoryTools
+import com.aurix.agent.core.notifications.NotificationTools
+import com.aurix.agent.core.tools.device.EmergencySosTool
 import com.aurix.agent.core.tools.AskUserTool
 import com.aurix.agent.core.tools.device.DeviceTools
 import com.aurix.agent.core.tools.screen.ScreenTools
@@ -59,11 +64,11 @@ object AppModule {
     fun provideScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     @Provides @Singleton
-    fun provideToolRegistry(@ApplicationContext ctx: Context, search: SearchManager, fetcher: SafeFetcher, ws: Workspace, questions: QuestionManager): ToolRegistry = ToolRegistry(
+    fun provideToolRegistry(@ApplicationContext ctx: Context, search: SearchManager, fetcher: SafeFetcher, ws: Workspace, questions: QuestionManager, memory: MemoryRepository, settings: AgentSettings): ToolRegistry = ToolRegistry(
         listOf(
             WebSearchTool(search), WebBrowserTool(fetcher),
             FileWriteTool(ws), FileReadTool(ws), FileEditTool(ws), FileListTool(ws),
             CalculatorTool(), AskUserTool(questions),
-        ) + DeviceTools.all(ctx) + ScreenTools.all() + StorageTools.all(ctx, ws)
+        ) + DeviceTools.all(ctx) + ScreenTools.all() + StorageTools.all(ctx, ws) + NotificationTools.all(settings) + MemoryTools.all(memory) + listOf(EmergencySosTool(ctx, memory))
     )
 }

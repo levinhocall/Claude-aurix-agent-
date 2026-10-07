@@ -14,6 +14,7 @@ import com.aurix.agent.core.mission.MissionStatus
 import com.aurix.agent.core.mission.StepEntity
 import com.aurix.agent.core.mission.StepStatus
 import com.aurix.agent.core.approval.QuestionManager
+import com.aurix.agent.core.memory.MemoryRepository
 import com.aurix.agent.core.tools.RiskLevel
 import com.aurix.agent.core.tools.ToolException
 import com.aurix.agent.core.tools.device.ContactResolver
@@ -49,6 +50,7 @@ class AgentRuntime @Inject constructor(
     private val notifier: MissionNotifier,
     private val contacts: ContactResolver,
     private val questions: QuestionManager,
+    private val memory: MemoryRepository,
 ) {
     private val limits = AgentLimits()
     private val stopRequests = ConcurrentHashMap<String, MissionStatus>()
@@ -63,6 +65,7 @@ class AgentRuntime @Inject constructor(
         var replans = 0
         var verifyRounds = 0
         var ctx: String? = null
+        var mem: List<String> = emptyList()
         val recent = ArrayDeque<Int>()
     }
 
@@ -79,6 +82,7 @@ class AgentRuntime @Inject constructor(
         val wasPaused = loaded.status == MissionStatus.PAUSED
         val r = Run(loaded)
         r.ctx = dao.getContext(missionId)
+        r.mem = try { memory.relevant(loaded.objective) } catch (e: Exception) { emptyList() }
         try {
             stopRequests.remove(missionId)
             r.m = save(r.m.copy(status = MissionStatus.RUNNING, error = null, currentAction = "Starting"))
@@ -111,7 +115,7 @@ class AgentRuntime @Inject constructor(
         }
     }
 
-    private fun objectiveText(r: Run) = "Objective: ${r.m.objective}" + (r.ctx?.let { "\nContext from the previous task: $it" } ?: "")
+    private fun objectiveText(r: Run) = "Objective: ${r.m.objective}" + (if (r.mem.isEmpty()) "" else "\nKnown about the user: ${r.mem.joinToString("; ")}") + (r.ctx?.let { "\nContext from the previous task: $it" } ?: "")
 
     // ---------------------------------------------------------------- planning
     private suspend fun plan(r: Run) {
@@ -190,7 +194,7 @@ class AgentRuntime @Inject constructor(
                     recover(r, steps, step, attempt, "Loop detected: identical tool call repeated")
                     return
                 }
-                val outcome = gatedExecute(r, step.idx, step.title, name, input, say)
+                val outcome = gatedExecute(r, step.idx, step.title, name, input, say, true)
                 if (outcome is ToolOutcome.Denied) {
                     scratch.append("\n[#").append(calls).append(' ').append(name).append("] -> ERROR PERMISSION_REQUIRED\nThe user DENIED this action. Do not retry it; use another approach or finish with status blocked.\n")
                     continue
@@ -224,10 +228,10 @@ class AgentRuntime @Inject constructor(
         object Denied : ToolOutcome
     }
 
-    private suspend fun gatedExecute(r: Run, stepIdx: Int, actionTitle: String, name: String, input: JSONObject, say: String): ToolOutcome {
+    private suspend fun gatedExecute(r: Run, stepIdx: Int, actionTitle: String, name: String, input: JSONObject, say: String, cloud: Boolean): ToolOutcome {
         val id = r.m.id
         val tool = registry.get(name)
-        var approved = tool == null || tool.riskFor(input).ordinal < RiskLevel.HIGH.ordinal
+        var approved = true // the policy below decides; if no approval is needed (or it was granted) the executor may run HIGH tools
         if (tool != null && approvals.needsApproval(tool, input)) {
             r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_APPROVAL, currentAction = "Waiting for your approval: $name"))
             notifier.approvalNeeded(r.m, tool.describe(input))
@@ -238,7 +242,7 @@ class AgentRuntime @Inject constructor(
             approved = true
         }
         r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_TOOL, currentAction = "Using $name"))
-        val res = tools.execute(id, stepIdx, name, input, approved)
+        val res = tools.execute(id, stepIdx, name, input, approved, cloud)
         r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = actionTitle))
         return ToolOutcome.Ran(res)
     }
@@ -261,7 +265,7 @@ class AgentRuntime @Inject constructor(
             title = "$shownTitle [${cmd.tool}]"
             dao.upsertSteps(listOf(StepEntity(id, 0, title, StepStatus.RUNNING, null, 1)))
         }
-        return when (val o = gatedExecute(r, 0, shownTitle, cmd.tool, input, "")) {
+        return when (val o = gatedExecute(r, 0, shownTitle, cmd.tool, input, "", false)) {
             is ToolOutcome.Denied -> {
                 dao.upsertSteps(listOf(StepEntity(id, 0, title, StepStatus.FAILED, "Denied by the user", 1)))
                 r.m = save(r.m.copy(finalResult = "Okay, I did not do it."))
@@ -272,7 +276,12 @@ class AgentRuntime @Inject constructor(
                 val first = o.res.output.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
                 if (o.res.ok) {
                     dao.upsertSteps(listOf(StepEntity(id, 0, title, StepStatus.DONE, o.res.output.take(300), 1)))
-                    r.m = save(r.m.copy(currentStep = 1, finalResult = first))
+                    var summary = first
+                    for ((t2, in2) in cmd.extra) {
+                        val o2 = gatedExecute(r, 0, shownTitle, t2, in2, "", false)
+                        summary += "; " + ((o2 as? ToolOutcome.Ran)?.res?.let { rr -> if (rr.ok) rr.output.lineSequence().first() else "${t2.lowercase()}: skipped (${rr.errorType})" } ?: "skipped")
+                    }
+                    r.m = save(r.m.copy(currentStep = 1, finalResult = summary))
                     end(id, MissionStatus.COMPLETED, "Completed", null)
                     true
                 } else if (o.res.errorType == ToolErrorType.PERMISSION_REQUIRED || !ai.hasProvider()) {

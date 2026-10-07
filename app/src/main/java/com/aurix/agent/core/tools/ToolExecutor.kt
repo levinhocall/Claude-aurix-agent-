@@ -22,10 +22,10 @@ class ToolExecutor @Inject constructor(
     private val events: AgentEvents,
     private val workspace: Workspace,
 ) {
-    suspend fun execute(missionId: String, stepIdx: Int, name: String, input: JSONObject, approved: Boolean = false): ToolResult {
+    suspend fun execute(missionId: String, stepIdx: Int, name: String, input: JSONObject, approved: Boolean = false, cloud: Boolean = false): ToolResult {
         val started = System.currentTimeMillis()
         events.emit(missionId, AgentEventType.TOOL_STARTED, "$name ${input.toString().take(200)}")
-        val result = run(missionId, name, input, approved)
+        val result = run(missionId, name, input, approved, cloud)
         val dur = System.currentTimeMillis() - started
         dao.insertToolCall(
             ToolCallEntity(
@@ -38,7 +38,7 @@ class ToolExecutor @Inject constructor(
         return result
     }
 
-    private suspend fun run(missionId: String, name: String, input: JSONObject, approved: Boolean): ToolResult {
+    private suspend fun run(missionId: String, name: String, input: JSONObject, approved: Boolean, cloud: Boolean): ToolResult {
         val tool = registry.get(name)
             ?: return ToolResult.fail(ToolErrorType.INVALID_INPUT, "Unknown tool '$name'. Available: ${registry.names()}")
         val missing = tool.required.filter { !input.has(it) || input.isNull(it) }
@@ -49,7 +49,7 @@ class ToolExecutor @Inject constructor(
         while (true) {
             attempt++
             val res: ToolResult = try {
-                withTimeout(tool.timeoutMs) { tool.execute(input, ToolContext(missionId)) }
+                withTimeout(tool.timeoutMs) { tool.execute(input, ToolContext(missionId, cloud)) }
             } catch (e: TimeoutCancellationException) {
                 ToolResult.fail(ToolErrorType.TIMEOUT, "Timed out after ${tool.timeoutMs / 1000}s")
             } catch (e: ToolException) {

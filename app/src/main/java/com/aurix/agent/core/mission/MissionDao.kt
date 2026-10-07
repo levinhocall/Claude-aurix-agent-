@@ -46,4 +46,12 @@ interface MissionDao {
 
     @Query("SELECT * FROM tool_calls ORDER BY ts DESC LIMIT 5000") suspend fun getAllToolCalls(): List<ToolCallEntity>
     @Query("SELECT * FROM mission_events WHERE type LIKE 'APPROVAL_%' OR type LIKE 'QUESTION_%' OR type IN ('MISSION_CREATED','MISSION_COMPLETED','MISSION_FAILED','MISSION_CANCELLED','MISSION_PAUSED','MISSION_RESUMED') ORDER BY ts DESC LIMIT 5000") suspend fun getAuditEvents(): List<EventEntity>
+
+    @Insert suspend fun insertMemory(m: com.aurix.agent.core.memory.MemoryEntity): Long
+    @Query("SELECT * FROM memories ORDER BY lastUsedAt DESC LIMIT 300") suspend fun allMemories(): List<com.aurix.agent.core.memory.MemoryEntity>
+    @Query("SELECT * FROM memories ORDER BY lastUsedAt DESC LIMIT 100") fun observeMemories(): Flow<List<com.aurix.agent.core.memory.MemoryEntity>>
+    @Query("SELECT * FROM memories WHERE kind = :kind") suspend fun memoriesOfKind(kind: String): List<com.aurix.agent.core.memory.MemoryEntity>
+    @Query("DELETE FROM memories WHERE id = :id") suspend fun deleteMemory(id: Long)
+    @Query("DELETE FROM memories") suspend fun clearMemories()
+    @Query("UPDATE memories SET lastUsedAt = :now, uses = uses + 1 WHERE id IN (:ids)") suspend fun touchMemories(ids: List<Long>, now: Long)
 }

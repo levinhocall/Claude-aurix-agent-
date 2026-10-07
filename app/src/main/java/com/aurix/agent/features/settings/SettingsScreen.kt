@@ -50,6 +50,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurix.agent.core.ai.routing.ProviderEntry
 import com.aurix.agent.core.voice.WakeWordService
 import com.aurix.agent.features.missions.shareFile
+import androidx.core.app.NotificationManagerCompat
 import com.aurix.agent.core.tools.screen.AurixAccessibilityService
 import com.aurix.agent.core.tools.storage.storageAccessGranted
 import com.aurix.agent.core.ai.routing.RoutingPolicy
@@ -96,7 +97,8 @@ fun SettingsScreen(onBack: () -> Unit, vm: SettingsViewModel = hiltViewModel()) 
             item { message?.let { Text(it, color = cs.tertiary, style = MaterialTheme.typography.bodySmall) } }
             items(ui.providers, key = { it.id }) { p -> ProviderBlock(p, status, vm) }
             item { VoiceSection(ui, vm) }
-            item { ApprovalAndPermissions(ui.strictApprovals, ui.alwaysAllowed, { vm.revokeAlways(it) }) { vm.setStrict(it) } }
+            item { ApprovalAndPermissions(ui, vm) }
+            item { MemorySection(ui, vm) }
             item { TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Advanced ▾" else "Advanced ▸") } }
             if (advanced) {
                 item {
@@ -163,7 +165,7 @@ private val PERMS = listOf(
 )
 
 @Composable
-private fun ApprovalAndPermissions(strict: Boolean, always: List<String>, onRevoke: (String) -> Unit, onStrict: (Boolean) -> Unit) {
+private fun ApprovalAndPermissions(ui: SettingsState, vm: SettingsViewModel) {
     val cs = MaterialTheme.colorScheme
     val ctx = LocalContext.current
     var tick by remember { mutableStateOf(0) }
@@ -172,13 +174,23 @@ private fun ApprovalAndPermissions(strict: Boolean, always: List<String>, onRevo
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Approvals & phone permissions", style = MaterialTheme.typography.titleSmall, color = cs.primary)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Switch(checked = strict, onCheckedChange = onStrict)
+            Switch(checked = ui.strictApprovals, onCheckedChange = { vm.setStrict(it) })
             Text("Strict: ask before every phone action (otherwise only SMS, calls and other sensitive actions ask)", style = MaterialTheme.typography.bodySmall)
         }
-        always.forEach { t ->
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Switch(checked = ui.jarvis, onCheckedChange = { vm.setJarvis(it) })
+            Text("Jarvis mode: do routine actions (SMS, calls, WhatsApp) without asking. Only critical ones (delete files, banking apps, SOS) still confirm.", style = MaterialTheme.typography.bodySmall)
+        }
+        val multi = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { tick++ }
+        OutlinedButton(onClick = {
+            val list = mutableListOf(Manifest.permission.SEND_SMS, Manifest.permission.CALL_PHONE, Manifest.permission.READ_CONTACTS, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT >= 33) list += Manifest.permission.POST_NOTIFICATIONS
+            multi.launch(list.toTypedArray())
+        }, modifier = Modifier.fillMaxWidth()) { Text("Grant all phone permissions (one tap)") }
+        ui.alwaysAllowed.forEach { t ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Always allowed: $t", style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { onRevoke(t) }) { Text("Revoke") }
+                TextButton(onClick = { vm.revokeAlways(t) }) { Text("Revoke") }
             }
         }
         PERMS.forEach { p ->
@@ -207,6 +219,18 @@ private fun ApprovalAndPermissions(strict: Boolean, always: List<String>, onRevo
             if (writeSettings) Text("✓ granted", color = cs.primary) else OutlinedButton(onClick = {
                 ctx.startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + ctx.packageName)))
             }) { Text("Open") }
+        }
+        val notifOn = remember(tick) { NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Notification access")
+                Text("read notifications, OTPs and missed calls on request (kept in memory only)", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            }
+            if (notifOn) Text("✓ on", color = cs.primary) else OutlinedButton(onClick = { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) { Text("Open") }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Switch(checked = ui.aiSeesNotifs, onCheckedChange = { vm.setAiSeesNotifs(it) })
+            Text("Let cloud AI models see notification text (off = only you hear/see it; simple commands like \"otp kya hai\" always work locally)", style = MaterialTheme.typography.bodySmall)
         }
         val a11y = remember(tick) { AurixAccessibilityService.enabledInSettings(ctx) }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -267,5 +291,25 @@ private fun VoiceSection(ui: SettingsState, vm: SettingsViewModel) {
             "To open the voice screen from the background, also enable 'Display over other apps' below and turn off battery optimisation for AURIX.",
             style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant,
         )
+    }
+}
+
+
+@Composable
+private fun MemorySection(ui: SettingsState, vm: SettingsViewModel) {
+    val cs = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Memory", style = MaterialTheme.typography.titleSmall, color = cs.primary)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Switch(checked = ui.memoryEnabled, onCheckedChange = { vm.setMemoryEnabled(it) })
+            Text("Remember useful facts (say \"remember that …\"). Emergency contacts: \"emergency contact Rahul 9876543210 add karo\".", style = MaterialTheme.typography.bodySmall)
+        }
+        ui.memories.take(30).forEach { m ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("${m.kind}: ${m.text}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                TextButton(onClick = { vm.deleteMemory(m.id) }) { Text("Delete") }
+            }
+        }
+        if (ui.memories.isNotEmpty()) OutlinedButton(onClick = { vm.clearMemories() }) { Text("Clear all memory") }
     }
 }

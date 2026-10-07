@@ -393,7 +393,17 @@ class AgentRuntime @Inject constructor(
         if (System.currentTimeMillis() - r.startedAt > limits.maxMissionMillis) throw StopMission(MissionStatus.FAILED, "Time limit reached for this run")
         if (m.tokensUsed >= limits.maxTokens) throw StopMission(MissionStatus.FAILED, "Token budget reached (${limits.maxTokens})")
         events.emit(m.id, AgentEventType.MODEL_REQUEST, purpose)
-        val resp = ai.complete(AiRequest(listOf(AiMessage("system", system), AiMessage("user", user)), maxTokens = maxTokens, purpose = purpose, escalate = escalate))
+        val acc = StringBuilder(); var lastAt = 0L; var shown = ""
+        val live: (suspend (String) -> Unit)? = if (purpose != "step") null else { d: String ->
+            acc.append(d)
+            val now = System.currentTimeMillis()
+            if (now - lastAt > 600) {
+                lastAt = now
+                val say = extractSay(acc.toString())
+                if (say != null && say != shown) { shown = say; r.m = save(r.m.copy(currentAction = say.take(110))) }
+            }
+        }
+        val resp = ai.complete(AiRequest(listOf(AiMessage("system", system), AiMessage("user", user)), maxTokens = maxTokens, purpose = purpose, escalate = escalate, json = true), live)
         val used = if (resp.usage.total > 0) resp.usage.total else (user.length + system.length + resp.text.length) / 4
         r.m = save(r.m.copy(iterations = r.m.iterations + 1, tokensUsed = r.m.tokensUsed + used))
         events.emit(m.id, AgentEventType.MODEL_RESPONSE, "$purpose, ~$used tokens, ${resp.model}")

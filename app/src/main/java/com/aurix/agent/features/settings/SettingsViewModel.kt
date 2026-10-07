@@ -3,6 +3,7 @@ package com.aurix.agent.features.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aurix.agent.core.ai.AiError
+import com.aurix.agent.core.ai.AiProviderManager
 import com.aurix.agent.core.approval.AgentSettings
 import com.aurix.agent.core.audit.AuditExporter
 import com.aurix.agent.core.approval.PermissionMode
@@ -44,6 +45,7 @@ class SettingsViewModel @Inject constructor(
     private val discovery: ModelDiscovery,
     private val agentSettings: AgentSettings,
     private val auditExporter: AuditExporter,
+    private val manager: AiProviderManager,
 ) : ViewModel() {
     private val _ui = MutableStateFlow(SettingsState())
     val ui: StateFlow<SettingsState> = _ui.asStateFlow()
@@ -61,7 +63,7 @@ class SettingsViewModel @Inject constructor(
 
     fun refreshStatus() {
         val m = HashMap<String, String>()
-        _ui.value.providers.forEach { p -> p.keys.forEach { m[it.id] = pool.status(it.id) } }
+        _ui.value.providers.forEach { p -> m["p:${p.id}"] = manager.health(p.id); p.keys.forEach { m[it.id] = pool.status(it.id) } }
         _status.value = m
         _ui.value = _ui.value.copy(todayTokens = usage.today())
     }

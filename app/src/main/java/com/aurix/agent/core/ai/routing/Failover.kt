@@ -29,7 +29,7 @@ internal class Failover(
     /** Models that failed with a model-specific error and then worked via the alternate: skipped for the rest of the session. */
     private val badModels = java.util.Collections.synchronizedSet(HashSet<String>())
 
-    suspend fun complete(request: AiRequest): AiResponse {
+    suspend fun complete(request: AiRequest, onDelta: (suspend (String) -> Unit)? = null): AiResponse {
         checkBudget()
         val usable = providers().filter { it.enabled && (it.local || it.keys.isNotEmpty()) }
         if (usable.isEmpty()) throw AiError(AiErrorType.AUTH_ERROR, "No AI provider is configured. Add an API key (or a local model) in Settings.")
@@ -44,20 +44,23 @@ internal class Failover(
                     tried++
                     pool.markUsed(key.id)
                     try {
+                        val t0 = System.currentTimeMillis()
                         val resp = try {
-                            callOnce(p, request.copy(model = model), key.secret)
+                            callOnce(p, request.copy(model = model), key.secret, onDelta)
                         } catch (e: AiError) {
                             val alt = if (e.modelSpecific) ModelRouter.alternateModel(p, model) else null
                             if (alt == null) throw e
-                            val r2 = callOnce(p, request.copy(model = alt), key.secret)
+                            val r2 = callOnce(p, request.copy(model = alt), key.secret, onDelta)
                             badModels += model
                             r2
                         }
+                        noteOk(p.id, System.currentTimeMillis() - t0)
                         pool.success(key.id, resp.usage.total)
                         onTokens(resp.usage.total)
                         return resp
                     } catch (e: AiError) {
                         last = e
+                        noteFail(p.id, e)
                         when (e.type) {
                             AiErrorType.AUTH_ERROR -> pool.disable(key.id, "auth failed")
                             AiErrorType.RATE_LIMIT -> {
@@ -92,12 +95,17 @@ internal class Failover(
 
     private fun keysOf(p: ProviderEntry): List<KeyEntry> = if (p.local) listOf(KeyEntry("local-${p.id}", "local", "")) else p.keys
 
-    private suspend fun callOnce(p: ProviderEntry, req: AiRequest, secret: String): AiResponse {
+    private val health = java.util.concurrent.ConcurrentHashMap<String, ProviderHealth>()
+    fun healthOf(id: String): ProviderHealth = health[id] ?: ProviderHealth()
+    private fun noteOk(id: String, ms: Long) { val h = healthOf(id); val n = h.ok + 1; health[id] = h.copy(ok = n, avgMs = (h.avgMs * h.ok + ms) / n) }
+    private fun noteFail(id: String, e: AiError) { val h = healthOf(id); health[id] = h.copy(fail = h.fail + 1, lastError = "${e.type.name}") }
+
+    private suspend fun callOnce(p: ProviderEntry, req: AiRequest, secret: String, onDelta: (suspend (String) -> Unit)?): AiResponse {
         val a = adapter(p)
         var attempt = 0
         while (true) {
             try {
-                return a.complete(req, secret)
+                return if (onDelta != null) a.stream(req, secret, onDelta) else a.complete(req, secret)
             } catch (e: AiError) {
                 if ((e.type == AiErrorType.NETWORK_ERROR || e.type == AiErrorType.TIMEOUT) && attempt < 1) {
                     attempt++
@@ -111,3 +119,5 @@ internal class Failover(
 
     private companion object { const val MAX_KEYS_PER_PROVIDER = 3 }
 }
+
+data class ProviderHealth(val ok: Int = 0, val fail: Int = 0, val avgMs: Long = 0, val lastError: String? = null)

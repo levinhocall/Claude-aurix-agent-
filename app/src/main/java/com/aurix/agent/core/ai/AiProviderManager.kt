@@ -32,7 +32,12 @@ class AiProviderManager @Inject constructor(
         onTokens = { usage.add(it) },
     )
 
-    suspend fun complete(request: AiRequest): AiResponse = failover.complete(request)
+    suspend fun complete(request: AiRequest, onDelta: (suspend (String) -> Unit)? = null): AiResponse = failover.complete(request, onDelta)
+
+    fun health(providerId: String): String {
+        val h = failover.healthOf(providerId)
+        return if (h.ok + h.fail == 0) "no calls yet" else "${h.ok} ok · ${h.fail} failed · avg ${"%.1f".format(h.avgMs / 1000.0)}s" + (h.lastError?.let { " · last: $it" } ?: "")
+    }
 
     fun hasProvider(): Boolean = store.providers().any { it.enabled && (it.local || it.keys.isNotEmpty()) }
 

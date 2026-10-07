@@ -10,6 +10,7 @@ data class AiRequest(
     val maxTokens: Int = 2048,
     val purpose: String = "",      // plan | replan | step | verify | test — used by the router
     val escalate: Boolean = false, // retry after failure: router may pick a stronger model
+    val json: Boolean = false,     // reply must be a JSON object (JSON mode where the model supports it)
 )
 
 data class TokenUsage(val promptTokens: Int = 0, val completionTokens: Int = 0) {
@@ -26,4 +27,7 @@ class AiError(val type: AiErrorType, message: String, val retryAfterMs: Long? = 
 interface AiProvider {
     val id: String
     suspend fun complete(request: AiRequest, apiKey: String): AiResponse
+
+    /** Streams text deltas to [onDelta]; providers without streaming just fall back to complete(). */
+    suspend fun stream(request: AiRequest, apiKey: String, onDelta: suspend (String) -> Unit): AiResponse = complete(request, apiKey)
 }

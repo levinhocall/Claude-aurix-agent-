@@ -1,6 +1,9 @@
 package com.aurix.agent.core.ai
 
 import com.aurix.agent.core.net.awaitResponse
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -72,5 +75,41 @@ internal suspend fun OkHttpClient.getJson(url: String, headers: Map<String, Stri
         val body = r.body?.string().orEmpty()
         if (!r.isSuccessful) throw mapHttpError(r.code, r.header("Retry-After"), body, secret)
         try { JSONObject(body) } catch (e: JSONException) { throw AiError(AiErrorType.MODEL_ERROR, "Provider returned a non-JSON response") }
+    }
+}
+
+/** POST and read a server-sent-events stream; [onData] receives each `data:` payload (without the prefix, excluding [DONE]). */
+internal suspend fun OkHttpClient.postSse(url: String, headers: Map<String, String>, payload: JSONObject, secret: String, onData: suspend (String) -> Unit) {
+    val req = try {
+        Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.header("Accept", "text/event-stream")
+            .post(payload.toString().toRequestBody("application/json".toMediaType())).build()
+    } catch (e: IllegalArgumentException) {
+        throw AiError(AiErrorType.INVALID_INPUT, "Invalid base URL")
+    }
+    val resp = try {
+        newCall(req).awaitResponse()
+    } catch (e: SocketTimeoutException) {
+        throw AiError(AiErrorType.TIMEOUT, "Request timed out")
+    } catch (e: IOException) {
+        throw AiError(AiErrorType.NETWORK_ERROR, "Network error (${e.javaClass.simpleName})")
+    }
+    resp.use { r ->
+        if (!r.isSuccessful) throw mapHttpError(r.code, r.header("Retry-After"), r.body?.string().orEmpty(), secret)
+        val src = r.body?.source() ?: throw AiError(AiErrorType.MODEL_ERROR, "Empty stream")
+        try {
+            withContext(Dispatchers.IO) {
+                while (isActive) {
+                    val line = src.readUtf8Line() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val d = line.removePrefix("data:").trim()
+                    if (d == "[DONE]") break
+                    if (d.isNotEmpty()) onData(d)
+                }
+            }
+        } catch (e: SocketTimeoutException) {
+            throw AiError(AiErrorType.TIMEOUT, "Stream timed out")
+        } catch (e: IOException) {
+            throw AiError(AiErrorType.NETWORK_ERROR, "Stream interrupted (${e.javaClass.simpleName})")
+        }
     }
 }

@@ -134,6 +134,7 @@ private fun ProviderBlock(p: ProviderEntry, status: Map<String, String>, vm: Set
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(p.name, fontWeight = FontWeight.Bold)
             Text((if (p.local) "Local server · " else "") + "Auto-selected · best: ${p.strongModel} · fast: ${p.fastModel}", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            Text("Health: " + status["p:${p.id}"].orEmpty(), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
             p.keys.forEach { k ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {

@@ -16,3 +16,10 @@ fun parseStepList(raw: String, max: Int = 12): List<String>? {
     val list = (0 until arr.length()).map { arr.optString(it).trim() }.filter { it.isNotEmpty() }.take(max)
     return list.ifEmpty { null }
 }
+
+/** Pulls the (possibly still incomplete) "say" text out of a streaming JSON reply so the UI can show live progress. */
+fun extractSay(partial: String): String? {
+    val m = Regex("\"say\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)").find(partial) ?: return null
+    val s = m.groupValues[1].replace("\\n", " ").replace("\\\"", "\"").replace("\\\\", "\\").trim()
+    return s.takeIf { it.length >= 3 }
+}

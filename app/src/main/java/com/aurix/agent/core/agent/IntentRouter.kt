@@ -19,7 +19,7 @@ object IntentRouter {
     )
 
     fun route(text: String, nowHour: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)): RoutedCommand? {
-        val orig = text.trim()
+        val orig = normalizeHindi(text.trim())
         if (orig.isEmpty() || orig.length > 400) return null
         contactCommand(orig)?.let { return it }
         memoryCommand(orig)?.let { return it }
@@ -29,7 +29,7 @@ object IntentRouter {
         val w = t.split(' ').filter { it.isNotEmpty() }
         if (w.isEmpty() || w.size > 12) return null
         if (w.any { it in joiners } || t.contains("uske baad")) return null
-        return flashlight(w) ?: timerOrAlarm(raw, t, w, nowHour) ?: volume(raw, w) ?: brightness(raw, w) ?: vibrate(w) ?: sosOrMode(t, w) ?: notificationCmd(t, w) ?: screenKey(t, w) ?: scroll(w) ?: battery(w) ?: networkOrPanel(t, w) ?: deviceInfo(t)
+        return flashlight(w) ?: timerOrAlarm(raw, t, w, nowHour) ?: volume(raw, w) ?: brightness(raw, w) ?: vibrate(w) ?: sosOrMode(t, w) ?: notificationCmd(t, w) ?: screenKey(t, w) ?: explainOrMedia(t, w) ?: placeCmd(t, w) ?: scroll(w) ?: battery(w) ?: networkOrPanel(t, w) ?: deviceInfo(t)
             ?: location(t) ?: storage(w) ?: media(w) ?: callNumber(raw) ?: navigate(t, w) ?: playMusic(t, w) ?: openApp(t, w)
     }
 
@@ -294,6 +294,23 @@ object IntentRouter {
         val m = Regex("^(?:call|dial|phone)\\s+(\\+?[0-9][0-9\\s\\-()]{5,})$").find(raw) ?: return null
         val n = m.groupValues[1].replace(Regex("[\\s\\-()]"), "")
         return cmd("CALL_PHONE", "Call $n", "number" to n)
+    }
+
+    private fun explainOrMedia(t: String, w: List<String>): RoutedCommand? {
+        if (t == "why did this fail" || t == "why did that fail" || t == "kya hua" || t == "kya hua tha" || t == "kyun fail hua" || t == "why failed") return cmd("EXPLAIN_LAST", "Explain last failure")
+        if (w.size <= 4 && w.contains("camera") && (w.contains("open") || w.contains("kholo") || w.contains("khol"))) return cmd("CAMERA_OPEN", "Open camera")
+        if (w.size <= 4 && (w.contains("photos") || w.contains("gallery")) && (w.contains("open") || w.contains("kholo") || w.contains("dikhao") || w.contains("show"))) return cmd("PHOTOS", "Open photos")
+        val m = Regex("^(?:nearby|near me|nearest|paas ke|pass ke)\\s+(.{2,30})$").find(t) ?: Regex("^(.{2,30})\\s+(?:near me|nearby|paas mein|pass mein)$").find(t)
+        if (m != null) return cmd("NEARBY_PLACES", "Nearby ${m.groupValues[1]}", "query" to m.groupValues[1])
+        return null
+    }
+
+    private val placeNames = setOf("ghar", "home", "office", "work", "gaadi", "car", "parking")
+    private fun placeCmd(t: String, w: List<String>): RoutedCommand? {
+        Regex("^(ghar|home|office|work|parking|gaadi|car) ka rasta(?: batao)?$").find(t)?.let { return cmd("PLACE_GO", "Go ${it.groupValues[1]}", "name" to it.groupValues[1]) }
+        Regex("^(?:navigate|take me|go) (?:to )?(home|work|office|parking)$").find(t)?.let { return cmd("PLACE_GO", "Go ${it.groupValues[1]}", "name" to it.groupValues[1]) }
+        Regex("^(?:save|yaad rakho) (?:this )?(?:as )?(home|work|office|parking|ghar) (?:is |= )?(.{3,80})$").find(t)?.let { return cmd("PLACE_SAVE", "Save ${it.groupValues[1]}", "name" to it.groupValues[1], "address" to it.groupValues[2]) }
+        return null
     }
 
     private val navTail = listOf("ka rasta batao", "ka rasta", "ke liye navigate karo", "ke liye navigate", "navigate karo", "pe le chalo", "par le chalo", "le chalo")

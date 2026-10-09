@@ -64,7 +64,7 @@ class IntentRouterTest {
         assertEquals("whatsapp", r("whatsapp kholo")!!.input.getString("name"))
         assertEquals("OPEN_APP", r("chrome khol do")!!.tool)
         assertEquals("pune station", r("navigate to pune station")!!.input.getString("destination"))
-        assertEquals("ghar", r("ghar ka rasta batao")!!.input.getString("destination"))
+        assertEquals("ghar", r("ghar ka rasta batao")!!.input.getString("name"))
         assertEquals("CALL_PHONE", r("call 98765 43210")!!.tool)
         assertEquals("9876543210", r("call 98765 43210")!!.input.getString("number"))
     }

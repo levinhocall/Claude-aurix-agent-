@@ -54,4 +54,7 @@ interface MissionDao {
     @Query("DELETE FROM memories WHERE id = :id") suspend fun deleteMemory(id: Long)
     @Query("DELETE FROM memories") suspend fun clearMemories()
     @Query("UPDATE memories SET lastUsedAt = :now, uses = uses + 1 WHERE id IN (:ids)") suspend fun touchMemories(ids: List<Long>, now: Long)
+
+    @Query("SELECT * FROM missions WHERE id != :excl AND status IN ('FAILED','PAUSED','CANCELLED') ORDER BY updatedAt DESC LIMIT 1") suspend fun lastProblemMission(excl: String): MissionEntity?
+    @Query("SELECT * FROM tool_calls WHERE missionId = :id AND ok = 0 ORDER BY id DESC LIMIT 1") suspend fun lastFailedToolCall(id: String): ToolCallEntity?
 }

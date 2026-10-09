@@ -105,11 +105,11 @@ fun HomeScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onVoice: () -> 
                                 label = { Text(m.objective, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 badge = { Text(statusGlyph(m.status), color = if (m.status.isActive()) cs.primary else cs.onSurfaceVariant) },
                                 selected = false,
-                                onClick = { scope.launch { drawer.close() }; onOpen(m.id) },
+                                onClick = { scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { drawer.snapTo(DrawerValue.Closed) }; onOpen(m.id) },
                             )
                         }
                     }
-                    NavigationDrawerItem(label = { Text("Settings & API keys") }, selected = false, onClick = { scope.launch { drawer.close() }; onSettings() })
+                    NavigationDrawerItem(label = { Text("Settings & API keys") }, selected = false, onClick = { scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { drawer.snapTo(DrawerValue.Closed) }; onSettings() })
                 }
             }
         },

@@ -34,6 +34,7 @@
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
     </queries>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <application
         android:name=".AurixApp"
         android:allowBackup="false"
@@ -84,6 +85,12 @@
             </intent-filter>
             <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service_config" />
         </service>
+        <receiver android:name=".core.proactive.ProactiveReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BATTERY_LOW" />
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+            </intent-filter>
+        </receiver>
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -16,6 +16,7 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.AlarmClock
+import kotlinx.coroutines.sync.withLock
 import android.provider.ContactsContract
 import android.provider.MediaStore
 import android.provider.Settings
@@ -143,6 +144,9 @@ class PlayMusicTool(private val ctx: Context) : Tool {
     }
 }
 
+private val alarmLock = kotlinx.coroutines.sync.Mutex()
+@Volatile private var lastAlarmAt = 0L
+
 class SetAlarmTool(private val ctx: Context) : Tool {
     override val name = "SET_ALARM"
     override val description = "Set an alarm at a clock time (24h)."
@@ -158,8 +162,15 @@ class SetAlarmTool(private val ctx: Context) : Tool {
         if (h !in 0..23 || m !in 0..59) throw ToolException(ToolErrorType.INVALID_INPUT, "hour 0-23 and minute 0-59 required")
         val i = Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR, h).putExtra(AlarmClock.EXTRA_MINUTES, m)
             .putExtra(AlarmClock.EXTRA_MESSAGE, input.optString("label")).putExtra(AlarmClock.EXTRA_SKIP_UI, true)
-        startOtherApp(ctx, i)
-        return ToolResult.ok("Alarm request sent for %02d:%02d".format(h, m))
+        // The Clock app can drop an alarm intent that arrives while it is still handling the previous one,
+        // so alarms are sent one at a time with a short gap.
+        alarmLock.withLock {
+            val wait = lastAlarmAt + 1500 - System.currentTimeMillis()
+            if (wait > 0) delay(wait)
+            startOtherApp(ctx, i)
+            lastAlarmAt = System.currentTimeMillis()
+        }
+        return ToolResult.ok("Alarm request sent to the Clock app for %02d:%02d (the Clock app merges identical alarms; check its list if two alarms were meant to have different times)".format(h, m))
     }
 }
 

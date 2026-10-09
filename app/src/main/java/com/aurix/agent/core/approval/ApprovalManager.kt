@@ -42,6 +42,14 @@ class AgentSettings @Inject constructor(private val secure: SecureSettings) {
     fun setAiSeesNotifications(on: Boolean) { secure.putString("ai_sees_notifs", if (on) "1" else "0") }
     fun alwaysAllowed(): Set<String> = secure.getString("always_allow").orEmpty().split(',').filter { it.isNotBlank() }.toSet()
     fun setAlwaysAllowed(s: Set<String>) { secure.putString("always_allow", s.joinToString(",")) }
+    fun elevenKey(): String = secure.getString("eleven_key").orEmpty()
+    fun setElevenKey(k: String) { secure.putString("eleven_key", k.trim()) }
+    fun elevenVoice(): String = secure.getString("eleven_voice")?.takeIf { it.isNotBlank() } ?: "21m00Tcm4TlvDq8ikWAM"
+    fun setElevenVoice(v: String) { secure.putString("eleven_voice", v.trim()) }
+    fun proactive(): Boolean = secure.getString("proactive") != "0"
+    fun setProactive(on: Boolean) { secure.putString("proactive", if (on) "1" else "0") }
+    fun carBluetooth(): String = secure.getString("car_bt").orEmpty()
+    fun setCarBluetooth(n: String) { secure.putString("car_bt", n.trim().take(40)) }
     fun wakeEnabled(): Boolean = secure.getString("wake_enabled") == "1"
     fun setWakeEnabled(on: Boolean) { secure.putString("wake_enabled", if (on) "1" else "0") }
 }

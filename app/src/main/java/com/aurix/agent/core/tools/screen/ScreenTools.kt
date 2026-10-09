@@ -10,7 +10,7 @@ import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 internal fun requireService(): AurixAccessibilityService = AurixAccessibilityService.instance
-    ?: throw ToolException(ToolErrorType.PERMISSION_REQUIRED, "Screen control is off. Open AURIX → Settings → Screen control and enable the accessibility service.")
+    ?: throw ToolException(ToolErrorType.PERMISSION_REQUIRED, "Screen control is not connected. Open AURIX → Settings → Screen control and enable the accessibility service. If it already shows ON, turn AURIX off and on again in Android Accessibility settings (Android sometimes drops the connection after an update or battery kill).")
 
 /** Safety rules for acting on other apps. */
 object ScreenGuard {

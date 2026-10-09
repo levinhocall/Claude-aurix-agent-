@@ -37,13 +37,22 @@ class MissionManager @Inject constructor(
     private fun wm() = WorkManager.getInstance(context)
     private fun workName(id: String) = "mission-$id"
 
-    suspend fun create(objective: String, context: String? = null): String {
+    suspend fun create(objective0: String, context0: String? = null): String {
+        var objective = objective0
+        var context = context0
+        when (val r = parseRetry(objective0)) {
+            RetryKind.SAME, RetryKind.DIFFERENT -> dao.latestMission()?.let { prev ->
+                objective = prev.objective
+                if (r == RetryKind.DIFFERENT) context = "RETRY: the previous attempt did not work. Try a different method than before (different tool, route or app). Do not repeat the same action." + (if (context0.isNullOrBlank()) "" else " $context0")
+            }
+            else -> {}
+        }
         val id = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
         dao.insertMission(MissionEntity(id = id, objective = objective, createdAt = now, updatedAt = now, status = MissionStatus.CREATED, currentAction = "Queued"))
         events.emit(id, AgentEventType.MISSION_CREATED, objective.take(120))
         if (!context.isNullOrBlank()) events.emit(id, AgentEventType.CONTEXT_PROVIDED, context.take(480))
-        start(id, IntentRouter.route(objective) == null)
+        start(id, forceAi(context) || IntentRouter.route(objective) == null)
         return id
     }
 
@@ -81,6 +90,24 @@ class MissionManager @Inject constructor(
 
     /** Process start: re-attach any unfinished mission to the queue (KEEP = no duplicate if WorkManager already has it). */
     fun onAppStart() {
+        scope.launch {
+            try {
+                val cut = System.currentTimeMillis() - 30L * 24 * 3600 * 1000
+                dao.purgeToolCalls(cut); dao.purgeEvents(cut); dao.purgeSteps(cut); dao.purgeFiles(cut); dao.purgeMissions(cut)
+            } catch (_: Exception) { /* retention is best-effort */ }
+        }
         scope.launch { dao.getActiveMissions().forEach { start(it.id, IntentRouter.route(it.objective) == null) } }
     }
 }
+
+enum class RetryKind { NONE, SAME, DIFFERENT }
+
+private val retrySame = setOf("retry", "try again", "again", "dobara karo", "dobara", "phir se karo", "fir se karo", "phir se", "fir se", "once more", "one more time", "dubara karo")
+private val retryDifferent = setOf("try another method", "try a different method", "try another way", "different way", "doosre tareeke se karo", "dusre tareeke se karo", "doosre tarike se karo", "dusre tarike se karo", "doosra tareeka", "alag tareeke se karo")
+
+fun parseRetry(text: String): RetryKind {
+    val t = text.trim().lowercase().trimEnd('.', '!', '?').replace(Regex("^(please|plz|pls)\\s+"), "").replace(Regex("\\s+(please|plz|pls)$"), "").trim()
+    return when (t) { in retrySame -> RetryKind.SAME; in retryDifferent -> RetryKind.DIFFERENT; else -> RetryKind.NONE }
+}
+
+internal fun forceAi(context: String?) = context?.startsWith("RETRY:") == true

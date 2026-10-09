@@ -15,7 +15,9 @@ import com.aurix.agent.core.approval.AgentSettings
 import com.aurix.agent.core.voice.WakeWordService
 import com.aurix.agent.ui.AurixNav
 import com.aurix.agent.ui.AurixTheme
+import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -41,7 +43,14 @@ class MainActivity : ComponentActivity() {
         handle(intent)
     }
 
+    @javax.inject.Inject lateinit var missionManager: com.aurix.agent.core.agent.MissionManager
+
     private fun handle(i: Intent?) {
+        i?.getStringExtra(EXTRA_COMMAND)?.takeIf { it.isNotBlank() }?.let { cmd ->
+            i.removeExtra(EXTRA_COMMAND)
+            lifecycleScope.launch { openMission.value = missionManager.create(cmd) }
+            return
+        }
         openMission.value = i?.getStringExtra(EXTRA_MISSION)
         val voice = i?.getBooleanExtra(EXTRA_VOICE, false) == true
         openVoice.value = voice
@@ -62,5 +71,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_MISSION = "mission_id"
         const val EXTRA_VOICE = "open_voice"
+        const val EXTRA_COMMAND = "run_command"
     }
 }

@@ -159,6 +159,12 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun elevenKeySet(): Boolean = agentSettings.elevenKey().isNotBlank()
+    fun setElevenKey(k: String) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setElevenKey(k) } }
+    fun proactiveOn(): Boolean = agentSettings.proactive()
+    fun setProactive(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setProactive(on) } }
+    fun carBluetooth(): String = agentSettings.carBluetooth()
+    fun setCarBluetooth(n: String) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setCarBluetooth(n) } }
     fun setUserName(n: String) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setUserName(n); reload() } }
     fun setWake(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setWakeEnabled(on); reload() } }
 

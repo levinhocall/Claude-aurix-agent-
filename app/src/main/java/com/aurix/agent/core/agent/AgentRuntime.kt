@@ -88,7 +88,7 @@ class AgentRuntime @Inject constructor(
             r.m = save(r.m.copy(status = MissionStatus.RUNNING, error = null, currentAction = "Starting"))
             if (wasPaused) events.emit(missionId, AgentEventType.MISSION_RESUMED)
             if (dao.getSteps(missionId).isEmpty()) {
-                val cmd = IntentRouter.route(r.m.objective)
+                val cmd = if (forceAi(r.ctx)) null else IntentRouter.route(r.m.objective)
                 if (cmd != null && runLocal(r, cmd)) return
                 if (!ai.hasProvider()) throw StopMission(
                     MissionStatus.FAILED,

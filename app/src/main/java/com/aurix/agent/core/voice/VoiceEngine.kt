@@ -23,6 +23,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
@@ -35,7 +37,11 @@ enum class VoicePhase { IDLE, LISTENING, THINKING, SPEAKING }
 
 /** Speech-to-text + text-to-speech on top of Android's built-in recognizer/TTS. One microphone user at a time. */
 @Singleton
-class VoiceEngine @Inject constructor(@ApplicationContext private val ctx: Context) {
+class VoiceEngine @Inject constructor(
+    @ApplicationContext private val ctx: Context,
+    private val settings: com.aurix.agent.core.approval.AgentSettings,
+    private val http: okhttp3.OkHttpClient,
+) {
     private val _phase = MutableStateFlow(VoicePhase.IDLE)
     val phase: StateFlow<VoicePhase> = _phase.asStateFlow()
     private val _level = MutableStateFlow(0f)
@@ -124,6 +130,8 @@ class VoiceEngine @Inject constructor(@ApplicationContext private val ctx: Conte
                     .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                     .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.packageName)
+                    .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (Locale.getDefault().language == "hi") "hi-IN" else "en-IN")
                 if (wakeCheck != null) muteEarcons(true)
                 rec.startListening(intent)
                 if (wakeCheck != null) main.postDelayed({ muteEarcons(false) }, 900)
@@ -145,14 +153,53 @@ class VoiceEngine @Inject constructor(@ApplicationContext private val ctx: Conte
         }
     }
 
-    fun stopSpeaking() { main.post { try { tts?.stop() } catch (e: Exception) { } } }
+    @Volatile private var player: android.media.MediaPlayer? = null
+    fun stopSpeaking() { main.post { try { tts?.stop() } catch (e: Exception) { }; try { player?.stop() } catch (e: Exception) { } } }
+
+    /** ElevenLabs voice (multilingual, so Hindi works). Returns false on any failure so the caller falls back to Android TTS. */
+    private suspend fun speakEleven(text: String): Boolean {
+        val key = settings.elevenKey()
+        if (key.isBlank()) return false
+        val file = java.io.File(ctx.cacheDir, "eleven_tts.mp3")
+        val ok = withContext(Dispatchers.IO) {
+            try {
+                val body = org.json.JSONObject().put("text", text).put("model_id", "eleven_multilingual_v2").toString()
+                    .toRequestBody("application/json".toMediaType())
+                val req = okhttp3.Request.Builder()
+                    .url("https://api.elevenlabs.io/v1/text-to-speech/${settings.elevenVoice()}?output_format=mp3_44100_64")
+                    .header("xi-api-key", key).header("Accept", "audio/mpeg").post(body).build()
+                http.newCall(req).execute().use { r ->
+                    if (!r.isSuccessful) return@use false
+                    r.body?.byteStream()?.use { inp -> file.outputStream().use { out -> inp.copyTo(out) } }
+                    file.length() > 500
+                }
+            } catch (e: Exception) { false }
+        }
+        if (!ok) return false
+        return withContext(Dispatchers.Main) {
+            suspendCancellableCoroutine<Boolean> { cont ->
+                val mp = android.media.MediaPlayer()
+                player = mp
+                fun end(v: Boolean) { try { mp.release() } catch (e: Exception) { }; if (player === mp) player = null; if (cont.isActive) cont.resume(v) }
+                try {
+                    mp.setDataSource(file.absolutePath)
+                    mp.setOnCompletionListener { end(true) }
+                    mp.setOnErrorListener { _, _, _ -> end(false); true }
+                    mp.setOnPreparedListener { it.start() }
+                    mp.prepareAsync()
+                } catch (e: Exception) { end(false) }
+                cont.invokeOnCancellation { try { mp.release() } catch (e: Exception) { } }
+            }
+        }
+    }
 
     suspend fun speak(text: String) {
         val clean = spokenText(text).take(700)
         if (clean.isBlank()) return
-        val engine = ensureTts() ?: return
         _phase.value = VoicePhase.SPEAKING
         try {
+            if (speakEleven(clean)) return
+            val engine = ensureTts() ?: return
             suspendCancellableCoroutine<Unit> { cont ->
                 val id = UUID.randomUUID().toString()
                 engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {

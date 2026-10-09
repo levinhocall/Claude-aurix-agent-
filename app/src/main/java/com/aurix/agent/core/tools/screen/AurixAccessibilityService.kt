@@ -1,6 +1,7 @@
 package com.aurix.agent.core.tools.screen
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -29,7 +30,21 @@ data class Snapshot(val pkg: String, val lines: List<String>, val more: Boolean)
 class AurixAccessibilityService : AccessibilityService() {
     @Volatile private var nodes: List<AccessibilityNodeInfo> = emptyList()
 
-    override fun onServiceConnected() { super.onServiceConnected(); instance = this }
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        // Re-assert the config in code so OEM/Android-13+ quirks can't leave the service half-configured.
+        try {
+            serviceInfo = (serviceInfo ?: AccessibilityServiceInfo()).apply {
+                eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
+                flags = AccessibilityServiceInfo.DEFAULT or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+                notificationTimeout = 100
+            }
+        } catch (_: Exception) { /* keep the XML config */ }
+        connectedAt = System.currentTimeMillis()
+        instance = this
+    }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) { lastEventAt = System.currentTimeMillis() }
     override fun onInterrupt() {}
     override fun onUnbind(intent: Intent?): Boolean { if (instance === this) instance = null; return super.onUnbind(intent) }
@@ -216,10 +231,15 @@ class AurixAccessibilityService : AccessibilityService() {
     companion object {
         @Volatile var instance: AurixAccessibilityService? = null
         @Volatile var lastEventAt: Long = 0
+        @Volatile var connectedAt: Long = 0
+
+        /** True only when Android has actually bound the service (enabled in Settings is not enough). */
+        fun isConnected() = instance != null
 
         fun enabledInSettings(ctx: Context): Boolean {
             val s = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
-            return s.contains(ctx.packageName) && s.contains(AurixAccessibilityService::class.java.simpleName)
+            val me = android.content.ComponentName(ctx, AurixAccessibilityService::class.java)
+            return s.split(':').any { android.content.ComponentName.unflattenFromString(it) == me }
         }
     }
 }

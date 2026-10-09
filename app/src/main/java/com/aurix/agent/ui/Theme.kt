@@ -42,4 +42,7 @@ private val Type = Typography(
 
 @Composable
 fun AurixTheme(content: @Composable () -> Unit) =
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, typography = Type, content = content)
+    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, typography = Type) {
+        // Opaque root so a screen transition or drawer scrim can never expose a black window behind the content.
+        androidx.compose.material3.Surface(color = MaterialTheme.colorScheme.background, content = content)
+    }

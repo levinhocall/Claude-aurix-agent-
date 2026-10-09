@@ -57,4 +57,13 @@ interface MissionDao {
 
     @Query("SELECT * FROM missions WHERE id != :excl AND status IN ('FAILED','PAUSED','CANCELLED') ORDER BY updatedAt DESC LIMIT 1") suspend fun lastProblemMission(excl: String): MissionEntity?
     @Query("SELECT * FROM tool_calls WHERE missionId = :id AND ok = 0 ORDER BY id DESC LIMIT 1") suspend fun lastFailedToolCall(id: String): ToolCallEntity?
+    @Query("SELECT * FROM missions WHERE id != :excl ORDER BY createdAt DESC LIMIT 1") suspend fun lastMissionExcept(excl: String): MissionEntity?
+    @Query("SELECT * FROM missions ORDER BY createdAt DESC LIMIT 1") suspend fun latestMission(): MissionEntity?
+
+    // retention: finished missions older than the cutoff, plus everything that hangs off them
+    @Query("DELETE FROM tool_calls WHERE missionId IN (SELECT id FROM missions WHERE status IN ('COMPLETED','FAILED','CANCELLED') AND updatedAt < :cut)") suspend fun purgeToolCalls(cut: Long)
+    @Query("DELETE FROM mission_events WHERE missionId IN (SELECT id FROM missions WHERE status IN ('COMPLETED','FAILED','CANCELLED') AND updatedAt < :cut)") suspend fun purgeEvents(cut: Long)
+    @Query("DELETE FROM mission_steps WHERE missionId IN (SELECT id FROM missions WHERE status IN ('COMPLETED','FAILED','CANCELLED') AND updatedAt < :cut)") suspend fun purgeSteps(cut: Long)
+    @Query("DELETE FROM mission_files WHERE missionId IN (SELECT id FROM missions WHERE status IN ('COMPLETED','FAILED','CANCELLED') AND updatedAt < :cut)") suspend fun purgeFiles(cut: Long)
+    @Query("DELETE FROM missions WHERE status IN ('COMPLETED','FAILED','CANCELLED') AND updatedAt < :cut") suspend fun purgeMissions(cut: Long)
 }

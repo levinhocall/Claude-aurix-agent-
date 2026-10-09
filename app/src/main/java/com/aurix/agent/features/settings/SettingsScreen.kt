@@ -185,6 +185,7 @@ private fun ApprovalAndPermissions(ui: SettingsState, vm: SettingsViewModel) {
         OutlinedButton(onClick = {
             val list = mutableListOf(Manifest.permission.SEND_SMS, Manifest.permission.CALL_PHONE, Manifest.permission.READ_CONTACTS, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.RECORD_AUDIO)
             if (Build.VERSION.SDK_INT >= 33) list += Manifest.permission.POST_NOTIFICATIONS
+            if (Build.VERSION.SDK_INT >= 31) list += Manifest.permission.BLUETOOTH_CONNECT
             multi.launch(list.toTypedArray())
         }, modifier = Modifier.fillMaxWidth()) { Text("Grant all phone permissions (one tap)") }
         ui.alwaysAllowed.forEach { t ->
@@ -232,16 +233,17 @@ private fun ApprovalAndPermissions(ui: SettingsState, vm: SettingsViewModel) {
             Switch(checked = ui.aiSeesNotifs, onCheckedChange = { vm.setAiSeesNotifs(it) })
             Text("Let cloud AI models see notification text (off = only you hear/see it; simple commands like \"otp kya hai\" always work locally)", style = MaterialTheme.typography.bodySmall)
         }
-        val a11y = remember(tick) { AurixAccessibilityService.enabledInSettings(ctx) }
+        val a11yEnabled = remember(tick) { AurixAccessibilityService.enabledInSettings(ctx) }
+        val a11y = a11yEnabled && AurixAccessibilityService.isConnected()
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Screen control (Accessibility)")
                 Text(
-                    "lets AURIX read the screen and tap/type/scroll in other apps. If Android says 'Restricted setting': App info → ⋮ → Allow restricted settings, then enable AURIX here. Never works inside AURIX, banking/UPI/password apps need approval each time.",
+                    "lets AURIX read the screen and tap/type/scroll in other apps. If it says Reconnect, switch AURIX off and on once. If Android says 'Restricted setting': App info → ⋮ → Allow restricted settings, then enable AURIX here. Never works inside AURIX, banking/UPI/password apps need approval each time.",
                     style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant,
                 )
             }
-            if (a11y) Text("✓ on", color = cs.primary) else OutlinedButton(onClick = { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) { Text("Open") }
+            if (a11y) Text("✓ connected", color = cs.primary) else OutlinedButton(onClick = { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) { Text(if (a11yEnabled) "Reconnect" else "Open") }
         }
         val files = remember(tick) { storageAccessGranted(ctx) }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -276,6 +278,26 @@ private fun VoiceSection(ui: SettingsState, vm: SettingsViewModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(name, { name = it }, singleLine = true, modifier = Modifier.weight(1f), label = { Text("Your name (for the greeting)") })
             OutlinedButton(onClick = { vm.setUserName(name) }) { Text("Save") }
+        }
+        var eleven by remember { mutableStateOf("") }
+        var elevenSet by remember { mutableStateOf(vm.elevenKeySet()) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                eleven, { eleven = it }, singleLine = true, modifier = Modifier.weight(1f),
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                label = { Text(if (elevenSet) "ElevenLabs key saved ✓ (paste new to replace, blank = remove)" else "ElevenLabs API key (optional, nicer voice)") },
+            )
+            OutlinedButton(onClick = { vm.setElevenKey(eleven); elevenSet = eleven.isNotBlank(); eleven = "" }) { Text("Save") }
+        }
+        var proactive by remember { mutableStateOf(vm.proactiveOn()) }
+        var car by remember { mutableStateOf(vm.carBluetooth()) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Switch(checked = proactive, onCheckedChange = { proactive = it; vm.setProactive(it) })
+            Text("Suggestions (low battery, car Bluetooth → driving mode)", style = MaterialTheme.typography.bodySmall)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(car, { car = it }, singleLine = true, modifier = Modifier.weight(1f), label = { Text("Car Bluetooth name (part of it is enough)") })
+            OutlinedButton(onClick = { vm.setCarBluetooth(car) }) { Text("Save") }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Switch(

@@ -109,6 +109,25 @@ class AurixAccessibilityService : AccessibilityService() {
         return Snapshot(root.packageName?.toString().orEmpty(), lines, more)
     }
 
+    /** Cheap signature of what is on screen (does not touch the element ids of the last snapshot). */
+    fun fingerprint(): Int {
+        val root = rootInActiveWindow ?: return 0
+        var h = root.packageName?.hashCode() ?: 0
+        var seen = 0
+        fun walk(n: AccessibilityNodeInfo, d: Int) {
+            if (d > 25 || seen > 150) return
+            if (n.isVisibleToUser) {
+                val l = labelOf(n)
+                if (l.isNotEmpty()) { h = 31 * h + l.hashCode(); seen++ }
+                if (n.isChecked) h = 31 * h + 1
+                if (n.isFocused) h = 31 * h + 2
+            }
+            for (i in 0 until n.childCount) { val c = n.getChild(i) ?: continue; walk(c, d + 1) }
+        }
+        walk(root, 0)
+        return h * 31 + seen
+    }
+
     fun snapshotText(max: Int = 30): String = snapshot(max).text()
 
     // ------------------------------------------------------------------ finding

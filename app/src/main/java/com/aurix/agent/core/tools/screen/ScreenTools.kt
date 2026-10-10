@@ -44,9 +44,15 @@ private abstract class ScreenTool : Tool {
     override fun riskFor(input: JSONObject): RiskLevel =
         ScreenGuard.riskFor(AurixAccessibilityService.instance?.foregroundPackage().orEmpty(), risk)
     protected fun appNote() = AurixAccessibilityService.instance?.foregroundPackage().orEmpty()
-    protected suspend fun after(svc: AurixAccessibilityService, msg: String): ToolResult {
+    /** After an action: let the UI settle, and if [before] is given check that the screen really changed. */
+    protected suspend fun after(svc: AurixAccessibilityService, msg: String, before: Int? = null): ToolResult {
         delay(450)
-        return ToolResult.ok(msg + "\n" + svc.snapshotText(30))
+        var note = ""
+        if (before != null && svc.fingerprint() == before) {
+            delay(700)
+            if (svc.fingerprint() == before) note = "\n⚠ The screen did not change after this action, so it probably did not work. Try a different element, scroll, wait, or another approach."
+        }
+        return ToolResult.ok(msg + note + "\n" + svc.snapshotText(30))
     }
 }
 
@@ -81,6 +87,7 @@ private class ScreenTapTool : ScreenTool() {
     override suspend fun execute(input: JSONObject, ctx: ToolContext): ToolResult {
         val s = svc()
         val long = input.optBoolean("long", false)
+        val before = s.fingerprint()
         val msg = when {
             input.has("id") -> {
                 val id = input.optInt("id")
@@ -98,7 +105,7 @@ private class ScreenTapTool : ScreenTool() {
             }
             else -> throw ToolException(ToolErrorType.INVALID_INPUT, "Give id, text, or x and y")
         }
-        return after(s, msg)
+        return after(s, msg, before)
     }
 }
 
@@ -112,9 +119,10 @@ private class ScreenTypeTool : ScreenTool() {
     override fun describe(input: JSONObject) = "Type \"${input.optString("text").take(60)}\" in ${appNote()}"
     override suspend fun execute(input: JSONObject, ctx: ToolContext): ToolResult {
         val s = svc()
+        val before = s.fingerprint()
         var msg = s.typeText(input.optString("text"), if (input.has("id")) input.optInt("id") else null, input.optBoolean("append", false))
         if (input.optBoolean("submit", false)) { delay(200); msg += "; " + s.pressKey("enter") }
-        return after(s, msg)
+        return after(s, msg, before)
     }
 }
 
@@ -130,7 +138,8 @@ private class ScreenScrollTool : ScreenTool() {
         val d = input.optString("direction").lowercase()
         if (d !in listOf("up", "down", "left", "right")) throw ToolException(ToolErrorType.INVALID_INPUT, "direction must be up, down, left or right")
         val s = svc()
-        return after(s, s.scroll(d))
+        val before = s.fingerprint()
+        return after(s, s.scroll(d), before)
     }
 }
 

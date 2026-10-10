@@ -17,6 +17,7 @@ import com.aurix.agent.di.ApplicationScope
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import com.aurix.agent.core.overlay.TaskOverlay
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -90,6 +91,9 @@ class MissionManager @Inject constructor(
 
     /** Process start: re-attach any unfinished mission to the queue (KEEP = no duplicate if WorkManager already has it). */
     fun onAppStart() {
+        scope.launch {
+            try { dao.observeMissions().collect { TaskOverlay.update(context, it.firstOrNull()) } } catch (_: Exception) { }
+        }
         scope.launch {
             try {
                 val cut = System.currentTimeMillis() - 30L * 24 * 3600 * 1000

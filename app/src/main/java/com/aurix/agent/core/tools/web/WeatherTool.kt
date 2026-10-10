@@ -21,11 +21,17 @@ import org.json.JSONObject
 
 data class WeatherCard(val place: String, val tempC: Int, val desc: String, val highC: Int, val lowC: Int, val humidity: Int, val windKmh: Int, val at: Long = System.currentTimeMillis())
 
+data class RouteCard(val from: String, val to: String, val km: Double, val minutes: Int, val at: Long = System.currentTimeMillis())
+
 /** The card the UI shows after a weather request. In-memory only. */
 object CardStore {
     private val _weather = MutableStateFlow<WeatherCard?>(null)
     val weather: StateFlow<WeatherCard?> = _weather.asStateFlow()
     fun show(c: WeatherCard) { _weather.value = c }
+    private val _route = MutableStateFlow<RouteCard?>(null)
+    val route: StateFlow<RouteCard?> = _route.asStateFlow()
+    fun showRoute(c: RouteCard) { _route.value = c }
+    fun dismissRoute() { _route.value = null }
     fun dismissWeather() { _weather.value = null }
 }
 
@@ -85,5 +91,47 @@ class WeatherTool(private val ctx: Context, private val http: OkHttpClient) : To
         } catch (e: com.aurix.agent.core.tools.ToolException) { throw e
         } catch (e: java.io.IOException) { ToolResult.fail(ToolErrorType.NETWORK_ERROR, "Weather service tak nahi pahunch paya: ${e.message}")
         } catch (e: Exception) { ToolResult.fail(ToolErrorType.TOOL_ERROR, "Weather parse nahi hua: ${e.message}") }
+    }
+}
+
+/** Distance and drive time to a place (OpenStreetMap search + OSRM, no API key). Shows a route card. */
+class RouteInfoTool(private val ctx: Context, private val http: OkHttpClient) : Tool {
+    override val name = "ROUTE_INFO"
+    override val description = "Drive distance and time from here to a place; shows a route card."
+    override val inputSchema = """{"destination":"Connaught Place Delhi"}"""
+    override val outputSchema = "distance and time"
+    override val required = listOf("destination")
+    override val risk = RiskLevel.LOW
+    override val timeoutMs = 25_000L
+
+    private fun get(url: String): String {
+        http.newCall(Request.Builder().url(url.toHttpUrl()).header("User-Agent", "AURIX-Android/1.0").build()).execute().use { r ->
+            if (!r.isSuccessful) throw java.io.IOException("HTTP ${r.code}")
+            return r.body?.string().orEmpty()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    override suspend fun execute(input: JSONObject, ctx0: ToolContext): ToolResult = withContext(Dispatchers.IO) {
+        val dest = input.optString("destination").trim()
+        if (dest.isEmpty()) return@withContext ToolResult.fail(ToolErrorType.INVALID_INPUT, "destination required")
+        try {
+            requirePermission(ctx, android.Manifest.permission.ACCESS_FINE_LOCATION, "Location")
+            val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val me = lm.getProviders(true).mapNotNull { lm.getLastKnownLocation(it) }.maxByOrNull { it.time }
+                ?: return@withContext ToolResult.fail(ToolErrorType.TOOL_ERROR, "Abhi location fix nahi hai")
+            val g = org.json.JSONArray(get("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + java.net.URLEncoder.encode(dest, "UTF-8")))
+            val hit = g.optJSONObject(0) ?: return@withContext ToolResult.fail(ToolErrorType.INVALID_INPUT, "\"$dest\" nahi mila")
+            val dLat = hit.getString("lat"); val dLon = hit.getString("lon")
+            val r = JSONObject(get("https://router.project-osrm.org/route/v1/driving/${me.longitude},${me.latitude};$dLon,$dLat?overview=false"))
+            val route = r.getJSONArray("routes").getJSONObject(0)
+            val km = Math.round(route.getDouble("distance") / 100.0) / 10.0
+            val min = Math.max(1, Math.round(route.getDouble("duration") / 60.0).toInt())
+            val label = hit.optString("display_name", dest).split(",").take(2).joinToString(",").trim()
+            CardStore.showRoute(RouteCard("Your location", label, km, min))
+            ToolResult.ok("Route to $label: $km km, about $min min by car.")
+        } catch (e: com.aurix.agent.core.tools.ToolException) { throw e
+        } catch (e: java.io.IOException) { ToolResult.fail(ToolErrorType.NETWORK_ERROR, "Route service tak nahi pahunch paya: ${e.message}")
+        } catch (e: Exception) { ToolResult.fail(ToolErrorType.TOOL_ERROR, "Route nahi nikla: ${e.message}") }
     }
 }

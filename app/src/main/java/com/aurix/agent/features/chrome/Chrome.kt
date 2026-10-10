@@ -102,6 +102,9 @@ fun AurixChrome(content: @Composable () -> Unit, vm: ChromeViewModel = hiltViewM
         ) { latest?.let { TaskCard(it) } }
         val wx by CardStore.weather.collectAsStateWithLifecycle()
         LaunchedEffect(wx?.at) { if (wx != null) { delay(25_000); CardStore.dismissWeather() } }
+        val rt by CardStore.route.collectAsStateWithLifecycle()
+        LaunchedEffect(rt?.at) { if (rt != null) { delay(25_000); CardStore.dismissRoute() } }
+        AnimatedVisibility(rt != null, modifier = Modifier.align(Alignment.Center), enter = fadeIn(), exit = fadeOut()) { rt?.let { RouteCardView(it) } }
         AnimatedVisibility(wx != null, modifier = Modifier.align(Alignment.Center), enter = fadeIn(), exit = fadeOut()) { wx?.let { WeatherCardView(it) } }
     }
 }
@@ -143,5 +146,19 @@ private fun WeatherCardView(c: WeatherCard) {
         Text("${c.tempC}°", color = cs.onSurface, fontSize = 56.sp, fontWeight = FontWeight.Light)
         Text(c.desc.replaceFirstChar { it.uppercase() }, color = cs.primary, fontSize = 14.sp)
         Text("H ${c.highC}°  L ${c.lowC}°   ·   💧 ${c.humidity}%   ·   🌬 ${c.windKmh} km/h", color = cs.onSurfaceVariant, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+@Composable
+private fun RouteCardView(c: com.aurix.agent.core.tools.web.RouteCard) {
+    val cs = MaterialTheme.colorScheme
+    Column(Modifier.width(280.dp).background(cs.surface.copy(alpha = 0.97f), RoundedCornerShape(24.dp)).padding(20.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Route", color = cs.primary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text("✕", color = cs.onSurfaceVariant, fontSize = 18.sp, modifier = Modifier.clickable { CardStore.dismissRoute() }.padding(4.dp))
+        }
+        Text("${c.minutes} min", color = cs.onSurface, fontSize = 44.sp, fontWeight = FontWeight.Light)
+        Text("${c.km} km by car", color = cs.onSurfaceVariant, fontSize = 14.sp)
+        Text("to ${c.to}", color = cs.onSurface, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
     }
 }

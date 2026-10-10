@@ -69,6 +69,6 @@ object AppModule {
             WebSearchTool(search), WebBrowserTool(fetcher),
             FileWriteTool(ws), FileReadTool(ws), FileEditTool(ws), FileListTool(ws),
             CalculatorTool(), AskUserTool(questions),
-        ) + DeviceTools.all(ctx) + ScreenTools.all() + StorageTools.all(ctx, ws) + NotificationTools.all(settings) + MemoryTools.all(memory) + listOf(EmergencySosTool(ctx, memory), com.aurix.agent.core.tools.ExplainLastTool(dao), com.aurix.agent.core.tools.web.WeatherTool(ctx, http)) + com.aurix.agent.core.tools.media.MediaTools.all(ctx, memory)
+        ) + DeviceTools.all(ctx) + ScreenTools.all() + StorageTools.all(ctx, ws) + NotificationTools.all(settings) + MemoryTools.all(memory) + listOf(EmergencySosTool(ctx, memory), com.aurix.agent.core.tools.ExplainLastTool(dao), com.aurix.agent.core.tools.web.WeatherTool(ctx, http), com.aurix.agent.core.tools.web.RouteInfoTool(ctx, http)) + com.aurix.agent.core.tools.media.MediaTools.all(ctx, memory)
     )
 }

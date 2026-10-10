@@ -29,4 +29,11 @@ class HindiAndMediaTest {
         assertEquals("partly cloudy", com.aurix.agent.core.tools.web.weatherCodeText(2))
         assertEquals("thunderstorm", com.aurix.agent.core.tools.web.weatherCodeText(95))
     }
+
+    @Test fun navigateAlsoFetchesRouteInfo() {
+        val c = IntentRouter.route("navigate to pune station")!!
+        assertEquals("NAVIGATE", c.tool)
+        assertEquals("ROUTE_INFO", c.extra.single().first)
+        assertEquals("pune station", c.extra.single().second.getString("destination"))
+    }
 }

@@ -329,7 +329,8 @@ object IntentRouter {
         if (dest == null) for (s in navTail) if (t.endsWith(s)) { dest = t.removeSuffix(s); break }
         val d = dest?.trim().orEmpty()
         if (d.isEmpty() || d.split(' ').size > 6) return null
-        return cmd("NAVIGATE", "Navigate to $d", "destination" to d)
+        val c = cmd("NAVIGATE", "Navigate to $d", "destination" to d)
+        return c.copy(extra = listOf("ROUTE_INFO" to JSONObject().put("destination", d)))
     }
 
     private val musicFiller = setOf("song", "songs", "gaana", "gana", "gane", "gaane", "music", "the", "some")

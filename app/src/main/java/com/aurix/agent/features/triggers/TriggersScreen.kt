@@ -45,8 +45,8 @@ class TriggersViewModel @Inject constructor(private val settings: AgentSettings,
 }
 
 private val MODES = listOf(
-    "Driving" to "driving mode on", "Sleep" to "sleep mode on", "Meeting" to "meeting mode on",
-    "Focus" to "focus mode on", "Normal" to "normal mode on",
+    "Driving" to "driving mode on", "Work" to "work mode on", "Sleep" to "sleep mode on",
+    "Gaming" to "gaming mode on", "Normal" to "normal mode on",
 )
 
 @Composable

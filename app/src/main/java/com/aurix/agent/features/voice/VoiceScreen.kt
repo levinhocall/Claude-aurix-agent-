@@ -39,7 +39,7 @@ import com.aurix.agent.core.voice.VoicePhase
 import com.aurix.agent.ui.VoiceOrb
 
 @Composable
-fun VoiceScreen(onClose: () -> Unit, onOpenMission: (String) -> Unit, vm: VoiceViewModel = hiltViewModel()) {
+fun VoiceScreen(onClose: () -> Unit, onOpenMission: (String) -> Unit, embedded: Boolean = false, vm: VoiceViewModel = hiltViewModel()) {
     val cs = MaterialTheme.colorScheme
     val ctx = LocalContext.current
     val phase by vm.phase.collectAsStateWithLifecycle()
@@ -50,23 +50,34 @@ fun VoiceScreen(onClose: () -> Unit, onOpenMission: (String) -> Unit, vm: VoiceV
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) vm.start() else vm.setCaption("Microphone permission is needed for voice")
     }
+    val home: com.aurix.agent.features.missions.HomeViewModel = hiltViewModel()
+    val userName by home.userName.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { home.refreshKey() }
+    fun tapOrb() {
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) vm.onOrbTap()
+        else launcher.launch(Manifest.permission.RECORD_AUDIO)
+    }
     LaunchedEffect(Unit) {
+        if (embedded) return@LaunchedEffect
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) vm.start()
         else launcher.launch(Manifest.permission.RECORD_AUDIO)
     }
     DisposableEffect(Unit) { onDispose { vm.stop() } }
 
     Column(
-        Modifier.fillMaxSize().background(cs.background).statusBarsPadding().navigationBarsPadding().padding(20.dp),
+        Modifier.fillMaxSize().background(cs.background).statusBarsPadding().then(if (embedded) Modifier else Modifier.navigationBarsPadding()).padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onClose) { Text("✕", fontSize = 22.sp, color = cs.onBackground) }
+            if (embedded) Column {
+                Text("Hello, " + userName.ifBlank { "there" }, style = MaterialTheme.typography.headlineMedium, color = cs.onBackground, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Text("How can I assist you today?", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+            } else TextButton(onClick = onClose) { Text("✕", fontSize = 22.sp, color = cs.onBackground) }
             val mid = missionId
             if (mid != null) TextButton(onClick = { onOpenMission(mid) }) { Text("Open task ›", color = cs.primary) }
         }
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Box(Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { vm.onOrbTap() }) {
+            Box(Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (embedded) tapOrb() else vm.onOrbTap() }) {
                 VoiceOrb(phase, level)
             }
         }
@@ -77,7 +88,7 @@ fun VoiceScreen(onClose: () -> Unit, onOpenMission: (String) -> Unit, vm: VoiceV
         Spacer(Modifier.height(8.dp))
         Text(
             when (phase) {
-                VoicePhase.LISTENING -> "Listening"; VoicePhase.THINKING -> "Thinking"; VoicePhase.SPEAKING -> "Speaking · tap the orb to interrupt"; VoicePhase.IDLE -> "Say “stop” to finish"
+                VoicePhase.LISTENING -> "Listening"; VoicePhase.THINKING -> "Thinking"; VoicePhase.SPEAKING -> "Speaking · tap the orb to interrupt"; VoicePhase.IDLE -> if (embedded) "Tap the orb and speak" else "Say “stop” to finish"
             },
             style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant,
         )

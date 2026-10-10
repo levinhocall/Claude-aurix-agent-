@@ -20,11 +20,11 @@ private val Light = lightColorScheme(
     outline = Color(0xFFDDDACE), error = Color(0xFFB3261E), tertiary = Color(0xFFB7791F),
 )
 private val Dark = darkColorScheme(
-    primary = Color(0xFFD97757), onPrimary = Color(0xFF1F1E1D),
-    background = Color(0xFF262624), onBackground = Color(0xFFF5F4EE),
-    surface = Color(0xFF30302E), onSurface = Color(0xFFF5F4EE),
-    surfaceVariant = Color(0xFF3A3935), onSurfaceVariant = Color(0xFFB5B3AB),
-    outline = Color(0xFF4A4945), error = Color(0xFFE5766C), tertiary = Color(0xFFE0A14A),
+    primary = Color(0xFFE5262B), onPrimary = Color.White,
+    background = Color(0xFF07070A), onBackground = Color(0xFFF2F2F5),
+    surface = Color(0xFF14141A), onSurface = Color(0xFFF2F2F5),
+    surfaceVariant = Color(0xFF1C1C24), onSurfaceVariant = Color(0xFFA0A0AE),
+    outline = Color(0xFF34343F), error = Color(0xFFFF6B6B), tertiary = Color(0xFFFFB74D),
 )
 
 val AurixGreen = Color(0xFF5BA874)
@@ -32,9 +32,9 @@ val AurixGreenBg = Color(0x225BA874)
 val AurixRedBg = Color(0x22E5534B)
 
 private val Type = Typography(
-    headlineMedium = TextStyle(fontFamily = FontFamily.Serif, fontWeight = FontWeight.Normal, fontSize = 30.sp, lineHeight = 36.sp),
-    titleLarge = TextStyle(fontFamily = FontFamily.Serif, fontWeight = FontWeight.Medium, fontSize = 22.sp),
-    titleMedium = TextStyle(fontFamily = FontFamily.Serif, fontWeight = FontWeight.Medium, fontSize = 17.sp),
+    headlineMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal, fontSize = 30.sp, lineHeight = 36.sp),
+    titleLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium, fontSize = 22.sp),
+    titleMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium, fontSize = 17.sp),
     titleSmall = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 13.sp, letterSpacing = 0.4.sp),
     bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
     bodyMedium = TextStyle(fontSize = 15.sp, lineHeight = 22.sp),
@@ -42,7 +42,7 @@ private val Type = Typography(
 
 @Composable
 fun AurixTheme(content: @Composable () -> Unit) =
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, typography = Type) {
+    MaterialTheme(colorScheme = Dark, typography = Type) {
         // Opaque root so a screen transition or drawer scrim can never expose a black window behind the content.
         androidx.compose.material3.Surface(color = MaterialTheme.colorScheme.background, content = content)
     }

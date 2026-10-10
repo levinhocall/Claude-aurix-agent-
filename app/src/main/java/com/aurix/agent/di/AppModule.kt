@@ -64,11 +64,11 @@ object AppModule {
     fun provideScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     @Provides @Singleton
-    fun provideToolRegistry(@ApplicationContext ctx: Context, search: SearchManager, fetcher: SafeFetcher, ws: Workspace, questions: QuestionManager, memory: MemoryRepository, settings: AgentSettings, dao: MissionDao): ToolRegistry = ToolRegistry(
+    fun provideToolRegistry(@ApplicationContext ctx: Context, search: SearchManager, fetcher: SafeFetcher, ws: Workspace, questions: QuestionManager, memory: MemoryRepository, settings: AgentSettings, dao: MissionDao, http: OkHttpClient): ToolRegistry = ToolRegistry(
         listOf(
             WebSearchTool(search), WebBrowserTool(fetcher),
             FileWriteTool(ws), FileReadTool(ws), FileEditTool(ws), FileListTool(ws),
             CalculatorTool(), AskUserTool(questions),
-        ) + DeviceTools.all(ctx) + ScreenTools.all() + StorageTools.all(ctx, ws) + NotificationTools.all(settings) + MemoryTools.all(memory) + listOf(EmergencySosTool(ctx, memory), com.aurix.agent.core.tools.ExplainLastTool(dao)) + com.aurix.agent.core.tools.media.MediaTools.all(ctx, memory)
+        ) + DeviceTools.all(ctx) + ScreenTools.all() + StorageTools.all(ctx, ws) + NotificationTools.all(settings) + MemoryTools.all(memory) + listOf(EmergencySosTool(ctx, memory), com.aurix.agent.core.tools.ExplainLastTool(dao), com.aurix.agent.core.tools.web.WeatherTool(ctx, http)) + com.aurix.agent.core.tools.media.MediaTools.all(ctx, memory)
     )
 }

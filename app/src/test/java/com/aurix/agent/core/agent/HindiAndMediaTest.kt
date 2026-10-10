@@ -18,4 +18,15 @@ class HindiAndMediaTest {
         assertEquals("PLACE_GO", IntentRouter.route("navigate to home")!!.tool)
         assertNotNull(IntentRouter.route("फ्लैशलाइट चालू करो"))
     }
+
+    @Test fun weatherRouting() {
+        assertEquals("delhi", IntentRouter.route("weather in delhi")!!.input.getString("city"))
+        assertEquals("pune", IntentRouter.route("pune ka mausam kaisa hai")!!.input.getString("city"))
+        assertEquals(false, IntentRouter.route("mausam kaisa hai")!!.input.has("city"))
+        assertEquals("WEATHER", IntentRouter.route("aaj ka weather batao")!!.tool)
+    }
+    @Test fun weatherCodes() {
+        assertEquals("partly cloudy", com.aurix.agent.core.tools.web.weatherCodeText(2))
+        assertEquals("thunderstorm", com.aurix.agent.core.tools.web.weatherCodeText(95))
+    }
 }

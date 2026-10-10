@@ -24,7 +24,13 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import com.aurix.agent.core.tools.web.CardStore
+import com.aurix.agent.core.tools.web.WeatherCard
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -94,6 +100,9 @@ fun AurixChrome(content: @Composable () -> Unit, vm: ChromeViewModel = hiltViewM
             modifier = Modifier.align(Alignment.TopCenter),
             enter = slideInVertically { -it } + fadeIn(), exit = slideOutVertically { -it } + fadeOut(),
         ) { latest?.let { TaskCard(it) } }
+        val wx by CardStore.weather.collectAsStateWithLifecycle()
+        LaunchedEffect(wx?.at) { if (wx != null) { delay(25_000); CardStore.dismissWeather() } }
+        AnimatedVisibility(wx != null, modifier = Modifier.align(Alignment.Center), enter = fadeIn(), exit = fadeOut()) { wx?.let { WeatherCardView(it) } }
     }
 }
 
@@ -118,5 +127,21 @@ private fun TaskCard(m: MissionEntity) {
         if (m.status.isActive() && m.totalSteps > 0) {
             LinearProgressIndicator(progress = { m.currentStep.toFloat() / m.totalSteps }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), color = cs.primary)
         }
+    }
+}
+
+@Composable
+private fun WeatherCardView(c: WeatherCard) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier.width(280.dp).background(cs.surface.copy(alpha = 0.97f), RoundedCornerShape(24.dp)).padding(20.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(c.place, color = cs.onSurface, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("✕", color = cs.onSurfaceVariant, fontSize = 18.sp, modifier = Modifier.clickable { CardStore.dismissWeather() }.padding(4.dp))
+        }
+        Text("${c.tempC}°", color = cs.onSurface, fontSize = 56.sp, fontWeight = FontWeight.Light)
+        Text(c.desc.replaceFirstChar { it.uppercase() }, color = cs.primary, fontSize = 14.sp)
+        Text("H ${c.highC}°  L ${c.lowC}°   ·   💧 ${c.humidity}%   ·   🌬 ${c.windKmh} km/h", color = cs.onSurfaceVariant, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
     }
 }

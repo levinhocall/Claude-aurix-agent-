@@ -29,7 +29,7 @@ object IntentRouter {
         val w = t.split(' ').filter { it.isNotEmpty() }
         if (w.isEmpty() || w.size > 12) return null
         if (w.any { it in joiners } || t.contains("uske baad")) return null
-        return flashlight(w) ?: timerOrAlarm(raw, t, w, nowHour) ?: volume(raw, w) ?: brightness(raw, w) ?: vibrate(w) ?: sosOrMode(t, w) ?: notificationCmd(t, w) ?: screenKey(t, w) ?: explainOrMedia(t, w) ?: placeCmd(t, w) ?: scroll(w) ?: battery(w) ?: networkOrPanel(t, w) ?: deviceInfo(t)
+        return flashlight(w) ?: timerOrAlarm(raw, t, w, nowHour) ?: volume(raw, w) ?: brightness(raw, w) ?: vibrate(w) ?: sosOrMode(t, w) ?: notificationCmd(t, w) ?: screenKey(t, w) ?: explainOrMedia(t, w) ?: weather(t, w) ?: placeCmd(t, w) ?: scroll(w) ?: battery(w) ?: networkOrPanel(t, w) ?: deviceInfo(t)
             ?: location(t) ?: storage(w) ?: media(w) ?: callNumber(raw) ?: navigate(t, w) ?: playMusic(t, w) ?: openApp(t, w)
     }
 
@@ -303,6 +303,14 @@ object IntentRouter {
         val m = Regex("^(?:nearby|near me|nearest|paas ke|pass ke)\\s+(.{2,30})$").find(t) ?: Regex("^(.{2,30})\\s+(?:near me|nearby|paas mein|pass mein)$").find(t)
         if (m != null) return cmd("NEARBY_PLACES", "Nearby ${m.groupValues[1]}", "query" to m.groupValues[1])
         return null
+    }
+
+    private val weatherFiller = setOf("weather", "mausam", "mosam", "ka", "ki", "ke", "kaisa", "kaisi", "hai", "ho", "raha", "rha", "in", "of", "for", "today", "aaj", "abhi", "now", "what", "whats", "the", "is", "how", "tell", "me", "batao", "bata", "do", "kya", "show", "check", "here", "yaha", "yahan", "outside", "bahar", "forecast", "temperature", "temp")
+    private fun weather(t: String, w: List<String>): RoutedCommand? {
+        if (w.none { it == "weather" || it == "mausam" || it == "mosam" }) return null
+        val city = w.filter { it !in weatherFiller }.joinToString(" ")
+        if (city.split(' ').size > 3) return null
+        return if (city.isEmpty()) cmd("WEATHER", "Weather") else cmd("WEATHER", "Weather in $city", "city" to city)
     }
 
     private val placeNames = setOf("ghar", "home", "office", "work", "gaadi", "car", "parking")

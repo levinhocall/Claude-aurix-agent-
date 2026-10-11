@@ -31,9 +31,10 @@ internal fun mapHttpError(code: Int, retryAfter: String?, body: String, secret: 
     val modelProblem = (code == 404 || code == 400) &&
         Regex("cannot be used with|model_not_found|does not exist|not a chat model|unsupported model|invalid model|no endpoints found|adapter|not supported", RegexOption.IGNORE_CASE).containsMatchIn(detail) &&
         Regex("model|endpoint|adapter", RegexOption.IGNORE_CASE).containsMatchIn(detail)
+    val ctxOverflow = (code == 400 || code == 413) && Regex("context length|context_length|maximum context|too many tokens|token limit|prompt is too long|reduce the length", RegexOption.IGNORE_CASE).containsMatchIn(detail)
     val specific = toolMisfire || modelProblem
-    val finalType = if (specific) AiErrorType.MODEL_ERROR else type
-    return AiError(finalType, "HTTP $code: ${redactSecret(detail.take(300), secret)}", retryAfter?.toLongOrNull()?.times(1000), modelSpecific = specific)
+    val finalType = when { ctxOverflow -> AiErrorType.CONTEXT_OVERFLOW; toolMisfire -> AiErrorType.UNSUPPORTED_CAPABILITY; specific -> AiErrorType.MODEL_ERROR; else -> type }
+    return AiError(finalType, "HTTP $code: ${redactSecret(detail.take(300), secret)}", retryAfter?.toLongOrNull()?.times(1000), modelSpecific = specific && !ctxOverflow)
 }
 
 /** POST JSON, map every failure to a categorized AiError, never leak the secret. */
@@ -54,7 +55,7 @@ internal suspend fun OkHttpClient.postJson(url: String, headers: Map<String, Str
     return resp.use { r ->
         val body = r.body?.string().orEmpty()
         if (!r.isSuccessful) throw mapHttpError(r.code, r.header("Retry-After"), body, secret)
-        try { JSONObject(body) } catch (e: JSONException) { throw AiError(AiErrorType.MODEL_ERROR, "Provider returned a non-JSON response") }
+        try { JSONObject(body) } catch (e: JSONException) { throw AiError(AiErrorType.INVALID_RESPONSE, "Provider returned a non-JSON response") }
     }
 }
 
@@ -74,7 +75,7 @@ internal suspend fun OkHttpClient.getJson(url: String, headers: Map<String, Stri
     return resp.use { r ->
         val body = r.body?.string().orEmpty()
         if (!r.isSuccessful) throw mapHttpError(r.code, r.header("Retry-After"), body, secret)
-        try { JSONObject(body) } catch (e: JSONException) { throw AiError(AiErrorType.MODEL_ERROR, "Provider returned a non-JSON response") }
+        try { JSONObject(body) } catch (e: JSONException) { throw AiError(AiErrorType.INVALID_RESPONSE, "Provider returned a non-JSON response") }
     }
 }
 
@@ -95,7 +96,7 @@ internal suspend fun OkHttpClient.postSse(url: String, headers: Map<String, Stri
     }
     resp.use { r ->
         if (!r.isSuccessful) throw mapHttpError(r.code, r.header("Retry-After"), r.body?.string().orEmpty(), secret)
-        val src = r.body?.source() ?: throw AiError(AiErrorType.MODEL_ERROR, "Empty stream")
+        val src = r.body?.source() ?: throw AiError(AiErrorType.INVALID_RESPONSE, "Empty stream")
         try {
             withContext(Dispatchers.IO) {
                 while (isActive) {

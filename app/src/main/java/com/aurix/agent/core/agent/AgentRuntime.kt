@@ -158,15 +158,18 @@ class AgentRuntime @Inject constructor(
         r.m = save(r.m.copy(currentStep = doneCount, totalSteps = steps.size, currentAction = step.title))
         events.emit(id, AgentEventType.STEP_STARTED, "${doneCount + 1}/${steps.size}: ${step.title}")
 
-        val base = buildString {
-            append(objectiveText(r)).append('\n')
-            val done = steps.filter { it.status == StepStatus.DONE }
-            if (done.isNotEmpty()) append("Done:\n").append(done.joinToString("\n") { "- ${cleanTitle(it.title)}: ${it.result.orEmpty().take(900)}" }).append('\n')
-            val later = steps.filter { it.idx > step.idx && it.status == StepStatus.PENDING }
-            if (later.isNotEmpty()) append("Later steps: ").append(later.joinToString("; ") { cleanTitle(it.title).take(60) }).append('\n')
-            append("Current step: ${cleanTitle(step.title)}")
-            if (step.attempts > 0 && !step.result.isNullOrBlank()) append("\nPrevious attempt failed: ${step.result.take(300)}")
-        }
+        val done = steps.filter { it.status == StepStatus.DONE }
+        val later = steps.filter { it.idx > step.idx && it.status == StepStatus.PENDING }
+        val base = ContextBuilder.build(
+            listOf(
+                ContextBuilder.Section(objectiveText(r), 0, minChars = 200),
+                ContextBuilder.Section(if (done.isEmpty()) "" else "Done:\n" + done.joinToString("\n") { "- ${cleanTitle(it.title)}: ${it.result.orEmpty().take(900)}" }, 1, minChars = 300),
+                ContextBuilder.Section(if (later.isEmpty()) "" else "Later steps: " + later.joinToString("; ") { cleanTitle(it.title).take(60) }, 2),
+                ContextBuilder.Section("Current step: ${cleanTitle(step.title)}", 0, minChars = 40),
+                ContextBuilder.Section(if (step.attempts > 0 && !step.result.isNullOrBlank()) "Previous attempt failed: ${step.result.take(300)}" else "", 1, minChars = 100),
+            ),
+            ContextBuilder.inputBudget(limits.contextTokens, 4096),
+        )
         val shown = registry.expand(toolHints(step.title)).let { if (it.isEmpty()) it else it + "ASK_USER" }
         val system = AgentPrompts.step(registry.catalog(if (shown.isEmpty()) null else shown), if (shown.isEmpty()) "" else registry.others(shown))
         if (settings.nativeTools() && ai.nativeAllowed() && !r.noNative) {
@@ -536,6 +539,7 @@ class AgentRuntime @Inject constructor(
 
     private suspend fun end(id: String, status: MissionStatus, action: String, error: String?) {
         val m = dao.getMission(id) ?: return
+        if (!m.status.canMoveTo(status)) return // e.g. a late "paused" must not overwrite a finished mission
         val steps = dao.getSteps(id)
         dao.updateMission(
             m.copy(

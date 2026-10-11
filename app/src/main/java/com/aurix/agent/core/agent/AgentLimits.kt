@@ -10,4 +10,5 @@ data class AgentLimits(
     val maxVerifyRounds: Int = 2,
     val maxPlanAttempts: Int = 2,
     val loopRepeatThreshold: Int = 3,
+    val contextTokens: Int = 32_000,          // conservative assumed context window for step prompts
 )

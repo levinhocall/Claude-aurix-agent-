@@ -9,6 +9,14 @@ enum class MissionStatus {
     CREATED, PLANNING, RUNNING, WAITING_FOR_TOOL, WAITING_FOR_APPROVAL, RECOVERING, PAUSED, COMPLETED, FAILED, CANCELLED;
 
     fun isTerminal() = this == COMPLETED || this == FAILED || this == CANCELLED
+
+    /** Legal status changes. Finished missions stay finished; FAILED/CANCELLED may be re-run (resume), COMPLETED may not. */
+    fun canMoveTo(next: MissionStatus): Boolean = when {
+        this == next -> true
+        this == COMPLETED -> false
+        this == CANCELLED || this == FAILED -> next == CREATED || next == PLANNING || next == RUNNING
+        else -> true
+    }
     fun isActive() = this == CREATED || this == PLANNING || this == RUNNING || this == WAITING_FOR_TOOL || this == WAITING_FOR_APPROVAL || this == RECOVERING
 }
 

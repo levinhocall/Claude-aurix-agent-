@@ -35,7 +35,7 @@ class OpenAiCompatibleProvider(
             if (request.json && mentionsJsonMode(e)) client.postJson(url, headers(apiKey), payload(request, false), apiKey) else throw e
         }
         val (content, calls) = parseOpenAiMessage(json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message"))
-        if (content.isBlank() && calls.isEmpty()) throw AiError(AiErrorType.MODEL_ERROR, "Empty model response")
+        if (content.isBlank() && calls.isEmpty()) throw AiError(AiErrorType.INVALID_RESPONSE, "Empty model response")
         val u = json.optJSONObject("usage")
         return AiResponse(content, TokenUsage(u?.optInt("prompt_tokens") ?: 0, u?.optInt("completion_tokens") ?: 0), json.optString("model", request.model), calls)
     }
@@ -68,7 +68,7 @@ class OpenAiCompatibleProvider(
                 }
             }
             val calls = pending.values.filter { it.name.isNotBlank() }.mapIndexed { i, pc -> AiToolCall(pc.id.ifBlank { "call_$i" }, pc.name, parseToolArguments(pc.args.toString())) }
-            if (text.isBlank() && calls.isEmpty()) throw AiError(AiErrorType.MODEL_ERROR, "Empty model response")
+            if (text.isBlank() && calls.isEmpty()) throw AiError(AiErrorType.INVALID_RESPONSE, "Empty model response")
             return AiResponse(text.toString(), usage, model, calls)
         }
         return try { run(request.json) } catch (e: AiError) { if (request.json && mentionsJsonMode(e)) run(false) else throw e }

@@ -118,7 +118,7 @@ class ModelFallbackTest {
 
     @Test fun toolChoiceNoneIs400MappedAsModelSpecific() {
         val e = mapHttpError(400, null, """{"error":{"message":"Tool choice is none, but model called a tool"}}""", "secret")
-        assertEquals(AiErrorType.MODEL_ERROR, e.type)
+        assertEquals(AiErrorType.UNSUPPORTED_CAPABILITY, e.type)
         assertTrue(e.modelSpecific)
     }
 }

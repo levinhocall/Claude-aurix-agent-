@@ -29,7 +29,13 @@ data class TokenUsage(val promptTokens: Int = 0, val completionTokens: Int = 0) 
 
 data class AiResponse(val text: String, val usage: TokenUsage, val model: String, val toolCalls: List<AiToolCall> = emptyList())
 
-enum class AiErrorType { NETWORK_ERROR, AUTH_ERROR, RATE_LIMIT, TIMEOUT, MODEL_ERROR, INVALID_INPUT, BUDGET_EXCEEDED, UNKNOWN_ERROR }
+enum class AiErrorType {
+    NETWORK_ERROR, AUTH_ERROR, RATE_LIMIT, TIMEOUT, MODEL_ERROR, INVALID_INPUT, BUDGET_EXCEEDED, UNKNOWN_ERROR,
+    CONTEXT_OVERFLOW,       // the prompt does not fit the model's context window
+    UNSUPPORTED_CAPABILITY, // the model/provider cannot do what was asked (tools, vision, JSON mode)
+    INVALID_RESPONSE,       // HTTP succeeded but the body had nothing usable
+    CONFIGURATION_ERROR,    // missing/invalid provider setup
+}
 
 class AiError(val type: AiErrorType, message: String, val retryAfterMs: Long? = null, val modelSpecific: Boolean = false) : Exception(message)
 

@@ -6,6 +6,7 @@ import com.aurix.agent.core.ai.AiProvider
 import com.aurix.agent.core.ai.AiRequest
 import com.aurix.agent.core.ai.AiResponse
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.withPermit
 
 /**
  * Provider/key selection and failover.
@@ -25,7 +26,15 @@ internal class Failover(
     private val checkBudget: () -> Unit,
     private val onTokens: (Int) -> Unit,
     private val sleep: suspend (Long) -> Unit = { delay(it) },
+    private val clock: () -> Long = { System.currentTimeMillis() },
+    private val random: () -> Double = { Math.random() },
 ) {
+    private val breakers = java.util.concurrent.ConcurrentHashMap<String, CircuitBreaker>()
+    private val limits = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Semaphore>()
+    private fun breaker(id: String) = breakers.getOrPut(id) { CircuitBreaker(clock = clock) }
+    private fun limit(id: String) = limits.getOrPut(id) { kotlinx.coroutines.sync.Semaphore(4) }
+    fun breakerState(id: String): BreakerState = breaker(id).state()
+
     /** Models that failed with a model-specific error and then worked via the alternate: skipped for the rest of the session. */
     private val badModels = java.util.Collections.synchronizedSet(HashSet<String>())
 
@@ -36,6 +45,12 @@ internal class Failover(
         var last: AiError? = null
         for (round in 0..1) {
             for (p in usable) {
+                val br = breaker(p.id)
+                if (!br.tryAcquire()) {
+                    if (last == null) last = AiError(AiErrorType.MODEL_ERROR, "${p.name} is temporarily unavailable (circuit open, retry in ${br.retryInMs() / 1000}s)")
+                    continue
+                }
+                var breakerSettled = false
                 val chosen = ModelRouter.modelFor(p, policy(), request)
                 val model = if (chosen in badModels) (ModelRouter.alternateModel(p, chosen) ?: chosen) else chosen
                 var tried = 0
@@ -54,6 +69,7 @@ internal class Failover(
                             badModels += model
                             r2
                         }
+                        br.onSuccess(); breakerSettled = true
                         noteOk(p.id, System.currentTimeMillis() - t0)
                         pool.success(key.id, resp.usage.total)
                         onTokens(resp.usage.total)
@@ -61,18 +77,20 @@ internal class Failover(
                     } catch (e: AiError) {
                         last = e
                         noteFail(p.id, e)
+                        if (!e.modelSpecific && (e.type == AiErrorType.NETWORK_ERROR || e.type == AiErrorType.TIMEOUT || e.type == AiErrorType.MODEL_ERROR || e.type == AiErrorType.INVALID_RESPONSE)) { br.onFailure(); breakerSettled = true }
                         when (e.type) {
                             AiErrorType.AUTH_ERROR -> pool.disable(key.id, "auth failed")
                             AiErrorType.RATE_LIMIT -> {
                                 pool.cooldown(key.id, (e.retryAfterMs ?: 60_000L).coerceIn(5_000L, 600_000L), "rate limited")
                                 if (!p.independentKeys) break
                             }
-                            AiErrorType.MODEL_ERROR -> { pool.cooldown(key.id, 20_000L, "provider error"); break }
+                            AiErrorType.MODEL_ERROR, AiErrorType.UNSUPPORTED_CAPABILITY, AiErrorType.INVALID_RESPONSE -> { pool.cooldown(key.id, 20_000L, "provider error"); break }
                             AiErrorType.NETWORK_ERROR, AiErrorType.TIMEOUT -> break
                             else -> throw e
                         }
                     }
                 }
+                if (!breakerSettled) br.onNeutral()
             }
             val wait = soonest(usable)
             val l = last
@@ -105,11 +123,11 @@ internal class Failover(
         var attempt = 0
         while (true) {
             try {
-                return if (onDelta != null) a.stream(req, secret, onDelta) else a.complete(req, secret)
+                return limit(p.id).withPermit { if (onDelta != null) a.stream(req, secret, onDelta) else a.complete(req, secret) }
             } catch (e: AiError) {
                 if ((e.type == AiErrorType.NETWORK_ERROR || e.type == AiErrorType.TIMEOUT) && attempt < 1) {
+                    sleep(Backoff.delayMs(attempt, e.retryAfterMs, random = random))
                     attempt++
-                    sleep(1_500)
                     continue
                 }
                 throw e

@@ -48,14 +48,14 @@ class AnthropicProvider(
             }
         }
         val calls = blocks.values.filter { it.name.isNotBlank() }.map { AiToolCall(it.id, it.name, parseToolInput(it.args.toString())) }
-        if (text.isBlank() && calls.isEmpty()) throw AiError(AiErrorType.MODEL_ERROR, "Empty model response")
+        if (text.isBlank() && calls.isEmpty()) throw AiError(AiErrorType.INVALID_RESPONSE, "Empty model response")
         return AiResponse(text.toString(), TokenUsage(inTok, outTok), model, calls)
     }
 
     override suspend fun complete(request: AiRequest, apiKey: String): AiResponse {
         val json = client.postJson(url, headers(apiKey), body(request), apiKey)
         val (text, calls) = parseAnthropicContent(json.optJSONArray("content"))
-        if (text.isBlank() && calls.isEmpty()) throw AiError(AiErrorType.MODEL_ERROR, "Empty model response")
+        if (text.isBlank() && calls.isEmpty()) throw AiError(AiErrorType.INVALID_RESPONSE, "Empty model response")
         val u = json.optJSONObject("usage")
         return AiResponse(text, TokenUsage(u?.optInt("input_tokens") ?: 0, u?.optInt("output_tokens") ?: 0), json.optString("model", request.model), calls)
     }

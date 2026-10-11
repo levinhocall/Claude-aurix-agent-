@@ -55,7 +55,8 @@ class ResilienceTest {
             override suspend fun complete(request: AiRequest, apiKey: String) = AiResponse("ok", TokenUsage(1, 1), "m")
         }
         fun prov(id: String) = ProviderEntry(id, ProviderType.OPENAI_COMPATIBLE, id, "https://x", "f", "s", true, false, listOf(KeyEntry("$id-0", "k", "secret-$id")))
-        val f = Failover({ listOf(prov("bad"), prov("good")) }, { RoutingPolicy.QUALITY }, KeyPool { 0L }, { if (it.id == "bad") bad else good }, {}, {}, { }, { 0L }, { 0.0 })
+        var t = 0L // key cooldowns expire between calls, so only the breaker can stop "bad" from being called
+        val f = Failover({ listOf(prov("bad"), prov("good")) }, { RoutingPolicy.QUALITY }, KeyPool { t += 100_000L; t }, { if (it.id == "bad") bad else good }, {}, {}, { }, { 0L }, { 0.0 })
         repeat(5) { assertEquals("ok", f.complete(AiRequest(emptyList())).text) }
         assertEquals(3, calls) // after 3 failures the breaker is open and "bad" is no longer called
         assertEquals(BreakerState.OPEN, f.breakerState("bad"))

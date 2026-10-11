@@ -8,6 +8,8 @@ import com.aurix.agent.core.ai.AiErrorType
 import com.aurix.agent.core.ai.AiMessage
 import com.aurix.agent.core.ai.AiProviderManager
 import com.aurix.agent.core.ai.AiRequest
+import com.aurix.agent.core.ai.AiResponse
+import com.aurix.agent.core.ai.AiTool
 import com.aurix.agent.core.mission.MissionDao
 import com.aurix.agent.core.mission.MissionEntity
 import com.aurix.agent.core.mission.MissionStatus
@@ -51,6 +53,7 @@ class AgentRuntime @Inject constructor(
     private val contacts: ContactResolver,
     private val questions: QuestionManager,
     private val memory: MemoryRepository,
+    private val settings: com.aurix.agent.core.approval.AgentSettings,
 ) {
     private val limits = AgentLimits()
     private val stopRequests = ConcurrentHashMap<String, MissionStatus>()
@@ -67,6 +70,7 @@ class AgentRuntime @Inject constructor(
         var ctx: String? = null
         var mem: List<String> = emptyList()
         val recent = ArrayDeque<Int>()
+        var noNative = false
     }
 
     private class StopMission(val status: MissionStatus, message: String) : Exception(message)
@@ -165,6 +169,10 @@ class AgentRuntime @Inject constructor(
         }
         val shown = registry.expand(toolHints(step.title)).let { if (it.isEmpty()) it else it + "ASK_USER" }
         val system = AgentPrompts.step(registry.catalog(if (shown.isEmpty()) null else shown), if (shown.isEmpty()) "" else registry.others(shown))
+        if (settings.nativeTools() && ai.nativeAllowed() && !r.noNative) {
+            if (runStepNative(r, steps, step, attempt, doneCount, base, shown)) return
+            r.noNative = true // the provider rejected native tools before anything ran: use the JSON protocol for the rest of this mission
+        }
         val scratch = StringBuilder()
         val seen = HashMap<String, Int>()
         var calls = 0
@@ -219,6 +227,107 @@ class AgentRuntime @Inject constructor(
                 recover(r, steps, step, attempt, result.ifBlank { "Step blocked" })
             }
             return
+        }
+    }
+
+    // ---------------------------------------------------------------- native function calling
+    private fun toolSupportError(e: AiError): Boolean =
+        e.modelSpecific || ((e.type == AiErrorType.INVALID_INPUT || e.type == AiErrorType.MODEL_ERROR) && Regex("tool|function", RegexOption.IGNORE_CASE).containsMatchIn(e.message.orEmpty()))
+
+    private suspend fun modelNative(r: Run, msgs: List<AiMessage>, tools: List<AiTool>, escalate: Boolean): AiResponse {
+        val m = r.m
+        if (m.iterations >= limits.maxIterations) throw StopMission(MissionStatus.FAILED, "Iteration limit reached (${limits.maxIterations})")
+        if (System.currentTimeMillis() - r.startedAt > limits.maxMissionMillis) throw StopMission(MissionStatus.FAILED, "Time limit reached for this run")
+        if (m.tokensUsed >= limits.maxTokens) throw StopMission(MissionStatus.FAILED, "Token budget reached (${limits.maxTokens})")
+        events.emit(m.id, AgentEventType.MODEL_REQUEST, "step (native tools)")
+        val acc = StringBuilder(); var lastAt = 0L
+        val live: suspend (String) -> Unit = { d ->
+            acc.append(d)
+            val now = System.currentTimeMillis()
+            if (now - lastAt > 600) {
+                lastAt = now
+                val t = acc.toString().replace(Regex("\\s+"), " ").trim()
+                if (t.length >= 3) r.m = save(r.m.copy(currentAction = t.take(110)))
+            }
+        }
+        val resp = ai.complete(AiRequest(msgs, maxTokens = 4096, purpose = "step", escalate = escalate, tools = tools), live)
+        val used = if (resp.usage.total > 0) resp.usage.total else (msgs.sumOf { it.content.length } + resp.text.length) / 4
+        r.m = save(r.m.copy(iterations = r.m.iterations + 1, tokensUsed = r.m.tokensUsed + used))
+        events.emit(m.id, AgentEventType.MODEL_RESPONSE, "step, ~$used tokens, ${resp.model}")
+        return resp
+    }
+
+    /** Keeps the first two messages and drops the oldest assistant-call + tool-result groups, so the history stays valid and small. */
+    private fun trimHistory(msgs: MutableList<AiMessage>) {
+        while (msgs.size > 26) {
+            var i = 2
+            if (i >= msgs.size) return
+            msgs.removeAt(i)
+            while (i < msgs.size && msgs[i].role == "tool") msgs.removeAt(i)
+        }
+    }
+
+    private suspend fun finishStep(r: Run, step: StepEntity, attempt: Int, doneCount: Int, result: String) {
+        val id = r.m.id
+        val h = (step.title + "|" + result).hashCode()
+        r.recent.addLast(h)
+        if (r.recent.size > 6) r.recent.removeFirst()
+        dao.upsertSteps(listOf(step.copy(status = StepStatus.DONE, attempts = attempt, result = result)))
+        if (r.recent.count { it == h } >= limits.loopRepeatThreshold)
+            throw StopMission(MissionStatus.FAILED, "Loop detected: identical step output repeated")
+        events.emit(id, AgentEventType.STEP_COMPLETED, step.title)
+        r.m = save(r.m.copy(currentStep = doneCount + 1))
+    }
+
+    /** Returns true when the step was finished or recovered; false when the provider does not support native tools (nothing was executed). */
+    private suspend fun runStepNative(r: Run, steps: List<StepEntity>, step: StepEntity, attempt: Int, doneCount: Int, base: String, shown: Set<String>): Boolean {
+        val id = r.m.id
+        val declared = registry.specs(if (shown.isEmpty()) null else shown) + AgentPrompts.FINISH_TOOL
+        val system = AgentPrompts.stepNative(if (shown.isEmpty()) "" else registry.others(shown))
+        val msgs = ArrayList<AiMessage>()
+        msgs += AiMessage("system", system)
+        msgs += AiMessage("user", base)
+        val seen = HashMap<String, Int>()
+        var calls = 0
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val resp = try { modelNative(r, msgs, declared, attempt > 1) } catch (e: AiError) {
+                if (calls == 0 && toolSupportError(e)) { ai.noteNativeFailure(); return false }
+                throw e
+            }
+            val text = resp.text.trim()
+            if (resp.toolCalls.isEmpty()) {
+                if (text.isBlank()) { recover(r, steps, step, attempt, "Model returned nothing"); return true }
+                finishStep(r, step, attempt, doneCount, text) // plain answer without a tool call = the step's result
+                return true
+            }
+            if (text.isNotEmpty()) events.emit(id, AgentEventType.ASSISTANT_NOTE, text.take(200))
+            msgs += AiMessage("assistant", text, toolCalls = resp.toolCalls)
+            for (c in resp.toolCalls) {
+                if (c.name == "finish_step") {
+                    val result = c.arguments.optString("result").ifBlank { text }
+                    if (c.arguments.optString("status") == "done") finishStep(r, step, attempt, doneCount, result)
+                    else recover(r, steps, step, attempt, result.ifBlank { "Step blocked" })
+                    return true
+                }
+                calls += 1
+                if (calls > limits.maxToolCallsPerStep) { recover(r, steps, step, attempt, "Too many tool calls without finishing the step"); return true }
+                val input = c.arguments
+                val key = "${c.name}|$input"
+                val n = (seen[key] ?: 0) + 1
+                seen[key] = n
+                if (n >= limits.loopRepeatThreshold) { recover(r, steps, step, attempt, "Loop detected: identical tool call repeated"); return true }
+                val reply = when {
+                    input.has("__invalid_arguments") -> "ERROR INVALID_INPUT\nThe arguments were not valid JSON. Call ${c.name} again with a proper JSON object."
+                    registry.get(c.name) == null -> "ERROR INVALID_INPUT\nUnknown tool ${c.name}. Use only the provided tools."
+                    else -> when (val o = gatedExecute(r, step.idx, step.title, c.name, input, text.take(80), true)) {
+                        is ToolOutcome.Denied -> "ERROR PERMISSION_REQUIRED\nThe user DENIED this action. Do not retry it; use another approach or finish with status blocked."
+                        is ToolOutcome.Ran -> (if (o.res.ok) "OK\n" else "ERROR ${o.res.errorType}\n") + o.res.output.take(1800)
+                    }
+                }
+                msgs += AiMessage("tool", reply, toolCallId = c.id)
+            }
+            trimHistory(msgs)
         }
     }
 

@@ -107,6 +107,11 @@ fun SettingsScreen(onBack: () -> Unit, vm: SettingsViewModel = hiltViewModel()) 
                             custom, { custom = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                             label = { Text("Custom base URL (other providers, or a local model e.g. http://192.168.1.5:11434/v1 — then leave the key empty)") },
                         )
+                        var nativeOn by remember { mutableStateOf(vm.nativeToolsOn()) }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Switch(checked = nativeOn, onCheckedChange = { nativeOn = it; vm.setNativeTools(it) })
+                            Text("Native tool calling (fewer errors, fewer tokens). Turn off only if a model misbehaves — AURIX also falls back by itself.", style = MaterialTheme.typography.bodySmall)
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Switch(checked = ui.policy == RoutingPolicy.BALANCED, onCheckedChange = { vm.setSaveCost(it) })
                             Text("Save cost: use the faster model for simple steps", style = MaterialTheme.typography.bodySmall)

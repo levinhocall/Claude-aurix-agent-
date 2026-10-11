@@ -39,6 +39,11 @@ class AiProviderManager @Inject constructor(
         return if (h.ok + h.fail == 0) "no calls yet" else "${h.ok} ok · ${h.fail} failed · avg ${"%.1f".format(h.avgMs / 1000.0)}s" + (h.lastError?.let { " · last: $it" } ?: "")
     }
 
+    /** Native tool calling is tried first; after repeated "tools not supported" failures it is skipped for the rest of the session. */
+    @Volatile private var nativeFailures = 0
+    fun nativeAllowed(): Boolean = nativeFailures < 2
+    fun noteNativeFailure() { nativeFailures++ }
+
     fun hasProvider(): Boolean = store.providers().any { it.enabled && (it.local || it.keys.isNotEmpty()) }
 
     private fun adapterFor(p: ProviderEntry): AiProvider = when (p.type) {

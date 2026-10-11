@@ -159,6 +159,8 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun nativeToolsOn(): Boolean = agentSettings.nativeTools()
+    fun setNativeTools(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setNativeTools(on) } }
     fun elevenKeySet(): Boolean = agentSettings.elevenKey().isNotBlank()
     fun setElevenKey(k: String) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setElevenKey(k) } }
     fun proactiveOn(): Boolean = agentSettings.proactive()

@@ -50,6 +50,8 @@ class AgentSettings @Inject constructor(private val secure: SecureSettings) {
     fun setProactive(on: Boolean) { secure.putString("proactive", if (on) "1" else "0") }
     fun carBluetooth(): String = secure.getString("car_bt").orEmpty()
     fun setCarBluetooth(n: String) { secure.putString("car_bt", n.trim().take(40)) }
+    fun nativeTools(): Boolean = secure.getString("native_tools") != "0"
+    fun setNativeTools(on: Boolean) { secure.putString("native_tools", if (on) "1" else "0") }
     fun wakeEnabled(): Boolean = secure.getString("wake_enabled") == "1"
     fun setWakeEnabled(on: Boolean) { secure.putString("wake_enabled", if (on) "1" else "0") }
 }

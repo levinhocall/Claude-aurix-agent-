@@ -11,6 +11,9 @@ class ToolRegistry(tools: List<Tool>) {
     /** Compact catalog (one line per tool). `only` limits it to the tools a step actually needs, which saves tokens on every model call. */
     fun catalog(only: Set<String>? = null): String = all().filter { only == null || it.name in only }.joinToString("\n") { line(it) }
 
+    /** Native function definitions for the given tools (null = all). */
+    fun specs(only: Set<String>? = null): List<com.aurix.agent.core.ai.AiTool> = all().filter { only == null || it.name in only }.map { ToolSchemas.spec(it) }
+
     fun others(shown: Set<String>): String = byName.keys.filter { it !in shown }.joinToString(", ")
 
     /** Hinted tools plus their siblings (SCREEN_*, STORAGE_*), so multi-tool flows have everything they need. */

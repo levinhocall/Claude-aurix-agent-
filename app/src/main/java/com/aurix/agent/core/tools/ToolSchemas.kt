@@ -19,8 +19,8 @@ object ToolSchemas {
     }
 
     private fun propFor(v: Any?): JSONObject = when (v) {
-        is Int, is Long -> JSONObject().put("type", "integer")
-        is Double, is Float -> JSONObject().put("type", "number")
+        is Int, is Long, is java.math.BigInteger -> JSONObject().put("type", "integer")
+        is Number -> JSONObject().put("type", "number")
         is Boolean -> JSONObject().put("type", "boolean")
         is JSONArray -> JSONObject().put("type", "array").put("items", JSONObject().put("type", "string"))
         is JSONObject -> JSONObject().put("type", "object")

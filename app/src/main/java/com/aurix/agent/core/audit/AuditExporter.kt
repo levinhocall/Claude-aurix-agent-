@@ -18,9 +18,9 @@ class AuditExporter @Inject constructor(@ApplicationContext private val ctx: Con
     suspend fun export(): File = withContext(Dispatchers.IO) {
         val rows = ArrayList<Pair<Long, List<String>>>()
         dao.getAllToolCalls().forEach { c ->
-            rows += c.ts to listOf(c.missionId.take(8), "tool", c.tool, if (c.ok) "ok" else c.errorType.orEmpty(), c.input.take(300), "${c.durationMs}ms")
+            rows += c.ts to listOf(c.missionId.take(8), "tool", c.tool, if (c.ok) "ok" else c.errorType.orEmpty(), com.aurix.agent.core.observability.Redactor.all(c.input).take(300), "${c.durationMs}ms")
         }
-        dao.getAuditEvents().forEach { e -> rows += e.ts to listOf(e.missionId.take(8), "event", e.type, "", e.detail.take(300), "") }
+        dao.getAuditEvents().forEach { e -> rows += e.ts to listOf(e.missionId.take(8), "event", e.type, "", com.aurix.agent.core.observability.Redactor.all(e.detail).take(300), "") }
         rows.sortBy { it.first }
         val dir = File(ctx.cacheDir, "audit").apply { mkdirs() }
         dir.listFiles()?.forEach { if (System.currentTimeMillis() - it.lastModified() > 24 * 3600 * 1000L) it.delete() }

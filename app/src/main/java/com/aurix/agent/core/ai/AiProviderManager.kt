@@ -44,6 +44,9 @@ class AiProviderManager @Inject constructor(
     fun nativeAllowed(): Boolean = nativeFailures < 2
     fun noteNativeFailure() { nativeFailures++ }
 
+    /** Active routing policy name, for diagnostics. */
+    fun policyName(): String = store.policy().name
+
     fun hasProvider(): Boolean = store.providers().any { it.enabled && (it.local || it.keys.isNotEmpty()) }
 
     private fun adapterFor(p: ProviderEntry): AiProvider = when (p.type) {

@@ -16,7 +16,25 @@ import com.aurix.agent.core.mission.MissionStatus
 import com.aurix.agent.core.mission.StepEntity
 import com.aurix.agent.core.mission.StepStatus
 import com.aurix.agent.core.approval.QuestionManager
+import com.aurix.agent.core.verification.VerificationService
+import com.aurix.agent.core.verification.VerificationState
+import com.aurix.agent.core.durability.CheckpointStore
+import com.aurix.agent.core.durability.CheckpointValidator
+import com.aurix.agent.core.durability.ResumeAction
+import com.aurix.agent.core.durability.SideEffectJournal
+import com.aurix.agent.core.durability.SideEffectPolicy
+import com.aurix.agent.core.durability.SideEffectReconciler
+import com.aurix.agent.core.durability.SideEffectState
 import com.aurix.agent.core.memory.MemoryRepository
+import com.aurix.agent.core.observability.ModelCallRecorder
+import com.aurix.agent.core.repair.ContextCompactor
+import com.aurix.agent.core.repair.FailureClassifier
+import com.aurix.agent.core.repair.FailureKind
+import com.aurix.agent.core.repair.RepairLedger
+import com.aurix.agent.core.repair.RepairStrategy
+import com.aurix.agent.core.security.InjectionDetector
+import com.aurix.agent.core.security.UntrustedContent
+import com.aurix.agent.core.tools.project.CodingWorkflow
 import com.aurix.agent.core.tools.RiskLevel
 import com.aurix.agent.core.tools.ToolException
 import com.aurix.agent.core.tools.device.ContactResolver
@@ -54,6 +72,11 @@ class AgentRuntime @Inject constructor(
     private val questions: QuestionManager,
     private val memory: MemoryRepository,
     private val settings: com.aurix.agent.core.approval.AgentSettings,
+    private val checkpoints: CheckpointStore,
+    private val journal: SideEffectJournal,
+    private val reconciler: SideEffectReconciler,
+    private val verification: VerificationService,
+    private val recorder: ModelCallRecorder,
 ) {
     private val limits = AgentLimits()
     private val stopRequests = ConcurrentHashMap<String, MissionStatus>()
@@ -71,6 +94,21 @@ class AgentRuntime @Inject constructor(
         var mem: List<String> = emptyList()
         val recent = ArrayDeque<Int>()
         var noNative = false
+        var tainted = false                       // untrusted content tried to give instructions: risky tools must ask again
+        val repairs = RepairLedger()              // bounded self-repair budget for this run
+    }
+
+    /** Wraps outside-world tool output as fenced data and flags injection attempts (they raise the approval level for the rest of the mission). */
+    private suspend fun observe(r: Run, name: String, res: ToolResult): String {
+        val body = res.output.take(1800)
+        val head = if (res.ok) "OK\n" else "ERROR ${res.errorType}\n"
+        if (!UntrustedContent.isSource(name)) return head + body
+        val hits = InjectionDetector.scan(body)
+        if (hits.isNotEmpty() && !r.tainted) {
+            r.tainted = true
+            events.emit(r.m.id, AgentEventType.SECURITY_NOTICE, "Possible prompt injection in $name output (${hits.joinToString()}). Treated as data; risky actions now need approval.")
+        }
+        return head + UntrustedContent.wrap(name, body)
     }
 
     private class StopMission(val status: MissionStatus, message: String) : Exception(message)
@@ -84,6 +122,7 @@ class AgentRuntime @Inject constructor(
         val loaded = dao.getMission(missionId) ?: return
         if (loaded.status.isTerminal()) return
         val wasPaused = loaded.status == MissionStatus.PAUSED
+        val wasActive = loaded.status.isActive() // active + not running in this process = the process died (or the device rebooted) mid-mission
         val r = Run(loaded)
         r.ctx = dao.getContext(missionId)
         r.mem = try { memory.relevant(loaded.objective) } catch (e: Exception) { emptyList() }
@@ -91,6 +130,7 @@ class AgentRuntime @Inject constructor(
             stopRequests.remove(missionId)
             r.m = save(r.m.copy(status = MissionStatus.RUNNING, error = null, currentAction = "Starting"))
             if (wasPaused) events.emit(missionId, AgentEventType.MISSION_RESUMED)
+            resumeChecks(r, wasActive)
             if (dao.getSteps(missionId).isEmpty()) {
                 val cmd = if (forceAi(r.ctx)) null else IntentRouter.route(r.m.objective)
                 if (cmd != null && runLocal(r, cmd)) return
@@ -119,6 +159,34 @@ class AgentRuntime @Inject constructor(
         }
     }
 
+    /** P3.5: validate the checkpoint, reconcile uncertain side effects (never repeated blindly), restore retry counters. */
+    private suspend fun resumeChecks(r: Run, autoResume: Boolean) {
+        val id = r.m.id
+        val steps = dao.getSteps(id)
+        if (steps.isEmpty()) return
+        val d = CheckpointValidator.validate(checkpoints.load(id), steps, r.m, autoResume, System.currentTimeMillis())
+        when (d.action) {
+            ResumeAction.REJECT -> throw StopMission(MissionStatus.FAILED, "Cannot resume: ${d.issues.joinToString("; ")}")
+            ResumeAction.MANUAL -> throw StopMission(MissionStatus.PAUSED, "Paused: ${d.issues.joinToString("; ")}. Tap Resume to continue.")
+            ResumeAction.REBUILD -> events.emit(id, AgentEventType.RECOVERY_STARTED, "Checkpoint not used (${d.issues.joinToString("; ")}); continuing from the saved step table")
+            ResumeAction.RESUME -> { r.replans = d.replans; r.verifyRounds = d.verifyRounds }
+        }
+        val notes = try { reconciler.reconcile(id) } catch (e: ToolException) { throw StopMission(MissionStatus.PAUSED, "Paused: waiting to confirm what happened before the interruption. ${e.message}") }
+        if (notes.isNotEmpty()) r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = "Resuming"))
+        // a local one-tool step whose action the user confirmed as done is finished, not run again
+        for (st in dao.getSteps(id).filter { it.status == StepStatus.RUNNING || it.status == StepStatus.PENDING }) {
+            val tool = Regex("\\[([A-Z_]+)]$").find(st.title)?.groupValues?.get(1) ?: continue
+            if (journal.doneFor(id, st.idx).any { it.tool == tool }) dao.upsertSteps(listOf(st.copy(status = StepStatus.DONE, result = "Done before the interruption (confirmed).")))
+        }
+        checkpoint(r, "resumed")
+    }
+
+    private suspend fun checkpoint(r: Run, note: String = "") {
+        try { checkpoints.save(r.m, dao.getSteps(r.m.id), r.replans, r.verifyRounds, note) }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { /* a failed checkpoint must never kill the mission; the Room step table is still the source of truth */ }
+    }
+
     private fun objectiveText(r: Run) = "Objective: ${r.m.objective}" + (if (r.mem.isEmpty()) "" else "\nKnown about the user: ${r.mem.joinToString("; ")}") + (r.ctx?.let { "\nContext from the previous task: $it" } ?: "")
 
     // ---------------------------------------------------------------- planning
@@ -126,7 +194,7 @@ class AgentRuntime @Inject constructor(
         r.m = save(r.m.copy(status = MissionStatus.PLANNING, currentAction = "Creating plan"))
         var titles: List<String>? = null
         for (attempt in 1..limits.maxPlanAttempts) {
-            titles = parseStepList(model(r, "plan", AgentPrompts.plan(registry.names()), objectiveText(r), 1024))
+            titles = parseStepList(model(r, "plan", AgentPrompts.plan(registry.names()) + (if (CodingWorkflow.applies(r.m.objective)) CodingWorkflow.PLAN_HINT else ""), objectiveText(r), 1024))
             if (titles != null) break
             events.emit(r.m.id, AgentEventType.RECOVERY_STARTED, "Plan was not valid JSON (attempt $attempt)")
         }
@@ -134,6 +202,7 @@ class AgentRuntime @Inject constructor(
         dao.upsertSteps(steps.mapIndexed { i, t -> StepEntity(r.m.id, i, t, StepStatus.PENDING) })
         r.m = save(r.m.copy(status = MissionStatus.RUNNING, totalSteps = steps.size, currentAction = "Plan ready"))
         events.emit(r.m.id, AgentEventType.PLAN_CREATED, "${steps.size} steps")
+        checkpoint(r, "plan")
     }
 
     // ---------------------------------------------------------------- loop
@@ -157,6 +226,8 @@ class AgentRuntime @Inject constructor(
         val doneCount = steps.count { it.status == StepStatus.DONE }
         r.m = save(r.m.copy(currentStep = doneCount, totalSteps = steps.size, currentAction = step.title))
         events.emit(id, AgentEventType.STEP_STARTED, "${doneCount + 1}/${steps.size}: ${step.title}")
+        checkpoint(r, "step ${step.idx + 1} started")
+        val performed = journal.performed(id)
 
         val done = steps.filter { it.status == StepStatus.DONE }
         val later = steps.filter { it.idx > step.idx && it.status == StepStatus.PENDING }
@@ -165,13 +236,14 @@ class AgentRuntime @Inject constructor(
                 ContextBuilder.Section(objectiveText(r), 0, minChars = 200),
                 ContextBuilder.Section(if (done.isEmpty()) "" else "Done:\n" + done.joinToString("\n") { "- ${cleanTitle(it.title)}: ${it.result.orEmpty().take(900)}" }, 1, minChars = 300),
                 ContextBuilder.Section(if (later.isEmpty()) "" else "Later steps: " + later.joinToString("; ") { cleanTitle(it.title).take(60) }, 2),
+                ContextBuilder.Section(if (performed.isEmpty()) "" else "Actions already performed or possibly performed in this mission (NEVER repeat them):\n" + performed.joinToString("\n") { "- ${it.summary} [${it.state}]" }, 0, minChars = 120),
                 ContextBuilder.Section("Current step: ${cleanTitle(step.title)}", 0, minChars = 40),
                 ContextBuilder.Section(if (step.attempts > 0 && !step.result.isNullOrBlank()) "Previous attempt failed: ${step.result.take(300)}" else "", 1, minChars = 100),
             ),
             ContextBuilder.inputBudget(limits.contextTokens, 4096),
         )
         val shown = registry.expand(toolHints(step.title)).let { if (it.isEmpty()) it else it + "ASK_USER" }
-        val system = AgentPrompts.step(registry.catalog(if (shown.isEmpty()) null else shown), if (shown.isEmpty()) "" else registry.others(shown))
+        val system = AgentPrompts.step(registry.catalog(if (shown.isEmpty()) null else shown), if (shown.isEmpty()) "" else registry.others(shown)) + stepExtras(shown)
         if (settings.nativeTools() && ai.nativeAllowed() && !r.noNative) {
             if (runStepNative(r, steps, step, attempt, doneCount, base, shown)) return
             r.noNative = true // the provider rejected native tools before anything ran: use the JSON protocol for the rest of this mission
@@ -212,7 +284,7 @@ class AgentRuntime @Inject constructor(
                 }
                 val res = (outcome as ToolOutcome.Ran).res
                 scratch.append("\n[#").append(calls).append(' ').append(name).append(' ').append(input.toString().take(300)).append("] -> ")
-                scratch.append(if (res.ok) "OK\n" else "ERROR ${res.errorType}\n").append(res.output.take(1800)).append('\n')
+                scratch.append(observe(r, name, res)).append('\n')
                 if (scratch.length > 6000) scratch.delete(0, scratch.length - 6000)
                 continue
             }
@@ -226,12 +298,17 @@ class AgentRuntime @Inject constructor(
                     throw StopMission(MissionStatus.FAILED, "Loop detected: identical step output repeated")
                 events.emit(id, AgentEventType.STEP_COMPLETED, step.title)
                 r.m = save(r.m.copy(currentStep = doneCount + 1))
+                checkpoint(r, "step ${step.idx + 1} done")
             } else {
                 recover(r, steps, step, attempt, result.ifBlank { "Step blocked" })
             }
             return
         }
     }
+
+    /** Security rule for fenced outside content, plus the coding rules whenever project tools are in play. */
+    private fun stepExtras(shown: Set<String>): String =
+        "\n" + UntrustedContent.PROMPT_RULE + (if (shown.any { it.startsWith("PROJECT_") }) "\n" + CodingWorkflow.STEP_RULES else "")
 
     // ---------------------------------------------------------------- native function calling
     private fun toolSupportError(e: AiError): Boolean =
@@ -253,7 +330,7 @@ class AgentRuntime @Inject constructor(
                 if (t.length >= 3) r.m = save(r.m.copy(currentAction = t.take(110)))
             }
         }
-        val resp = ai.complete(AiRequest(msgs, maxTokens = 4096, purpose = "step", escalate = escalate, tools = tools), live)
+        val resp = completeRecorded(r, AiRequest(msgs, maxTokens = 4096, purpose = "step", escalate = escalate, tools = tools), live)
         val used = if (resp.usage.total > 0) resp.usage.total else (msgs.sumOf { it.content.length } + resp.text.length) / 4
         r.m = save(r.m.copy(iterations = r.m.iterations + 1, tokensUsed = r.m.tokensUsed + used))
         events.emit(m.id, AgentEventType.MODEL_RESPONSE, "step, ~$used tokens, ${resp.model}")
@@ -280,13 +357,14 @@ class AgentRuntime @Inject constructor(
             throw StopMission(MissionStatus.FAILED, "Loop detected: identical step output repeated")
         events.emit(id, AgentEventType.STEP_COMPLETED, step.title)
         r.m = save(r.m.copy(currentStep = doneCount + 1))
+        checkpoint(r, "step ${step.idx + 1} done")
     }
 
     /** Returns true when the step was finished or recovered; false when the provider does not support native tools (nothing was executed). */
     private suspend fun runStepNative(r: Run, steps: List<StepEntity>, step: StepEntity, attempt: Int, doneCount: Int, base: String, shown: Set<String>): Boolean {
         val id = r.m.id
         val declared = registry.specs(if (shown.isEmpty()) null else shown) + AgentPrompts.FINISH_TOOL
-        val system = AgentPrompts.stepNative(if (shown.isEmpty()) "" else registry.others(shown))
+        val system = AgentPrompts.stepNative(if (shown.isEmpty()) "" else registry.others(shown)) + stepExtras(shown)
         val msgs = ArrayList<AiMessage>()
         msgs += AiMessage("system", system)
         msgs += AiMessage("user", base)
@@ -325,7 +403,7 @@ class AgentRuntime @Inject constructor(
                     registry.get(c.name) == null -> "ERROR INVALID_INPUT\nUnknown tool ${c.name}. Use only the provided tools."
                     else -> when (val o = gatedExecute(r, step.idx, step.title, c.name, input, text.take(80), true)) {
                         is ToolOutcome.Denied -> "ERROR PERMISSION_REQUIRED\nThe user DENIED this action. Do not retry it; use another approach or finish with status blocked."
-                        is ToolOutcome.Ran -> (if (o.res.ok) "OK\n" else "ERROR ${o.res.errorType}\n") + o.res.output.take(1800)
+                        is ToolOutcome.Ran -> observe(r, c.name, o.res)
                     }
                 }
                 msgs += AiMessage("tool", reply, toolCallId = c.id)
@@ -344,7 +422,7 @@ class AgentRuntime @Inject constructor(
         val id = r.m.id
         val tool = registry.get(name)
         var approved = true // the policy below decides; if no approval is needed (or it was granted) the executor may run HIGH tools
-        if (tool != null && approvals.needsApproval(tool, input)) {
+        if (tool != null && (approvals.needsApproval(tool, input) || (r.tainted && tool.riskFor(input) != RiskLevel.LOW))) {
             r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_APPROVAL, currentAction = "Waiting for your approval: $name"))
             notifier.approvalNeeded(r.m, tool.describe(input))
             val decision = approvals.request(id, tool, name, input, say)
@@ -353,8 +431,21 @@ class AgentRuntime @Inject constructor(
             if (decision == Decision.DENIED) return ToolOutcome.Denied
             approved = true
         }
+        val nonIdempotent = tool != null && SideEffectPolicy.isNonIdempotent(name, tool.riskFor(input))
+        if (nonIdempotent) {
+            journal.duplicate(id, name, input)?.let { d ->
+                events.emit(id, AgentEventType.RECOVERY_STARTED, "Blocked repeat of $name (${d.state})")
+                return ToolOutcome.Ran(ToolResult.fail(ToolErrorType.INVALID_INPUT, "DUPLICATE_SIDE_EFFECT: this exact action was already performed or may have been (${d.state}). It will NOT be repeated. Verify the result or tell the user instead."))
+            }
+        }
         r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_TOOL, currentAction = "Using $name"))
-        val res = tools.execute(id, stepIdx, name, input, approved, cloud)
+        val jid = if (nonIdempotent) journal.begin(id, stepIdx, name, input, tool?.describe(input) ?: name) else -1L
+        var res = tools.execute(id, stepIdx, name, input, approved, cloud)
+        if (jid >= 0) {
+            journal.finish(jid, res.ok, res.errorType)
+            if (SideEffectPolicy.stateAfter(res.ok, res.errorType) == SideEffectState.UNCERTAIN)
+                res = res.copy(output = "UNCERTAIN OUTCOME: this action may already have happened. Do NOT repeat it; check or tell the user.\n" + res.output)
+        }
         r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = actionTitle))
         return ToolOutcome.Ran(res)
     }
@@ -453,6 +544,7 @@ class AgentRuntime @Inject constructor(
             replan(r, steps, step, reason)
         }
         r.m = save(r.m.copy(status = MissionStatus.RUNNING))
+        checkpoint(r, "recovered")
     }
 
     private suspend fun replan(r: Run, steps: List<StepEntity>, failed: StepEntity, reason: String) {
@@ -474,7 +566,7 @@ class AgentRuntime @Inject constructor(
         // Tiny missions without files (e.g. a phone action): the last step result IS the answer; skipping the verifier saves a model call.
         if (steps.size <= 3 && steps.none { it.status == StepStatus.FAILED } && dao.getFiles(id).isEmpty()) {
             val last = steps.lastOrNull { it.status == StepStatus.DONE }?.result.orEmpty()
-            if (last.isNotBlank()) {
+            if (last.isNotBlank() && completable(verification.assess(id, last).state)) {
                 r.m = save(r.m.copy(finalResult = last))
                 end(id, MissionStatus.COMPLETED, "Completed", null)
                 return true
@@ -489,12 +581,19 @@ class AgentRuntime @Inject constructor(
         val raw = model(r, "verify", AgentPrompts.VERIFY, "Objective: ${r.m.objective}\n\nExecuted steps:\n$results\n\nFiles:\n$files", 3000)
         val o = extractJson(raw)
         val summary = o?.optString("final_answer").orEmpty()
+        var evidenceGaps: List<String> = emptyList()
         if (o != null && o.optBoolean("satisfied") && summary.isNotBlank()) {
-            r.m = save(r.m.copy(finalResult = summary))
-            end(id, MissionStatus.COMPLETED, "Completed", null)
-            return true
+            // the model's claim is not proof: completion needs evidence (tool results, files on disk, passing runs)
+            val a = verification.assess(id, summary)
+            if (completable(a.state)) {
+                r.m = save(r.m.copy(finalResult = summary))
+                end(id, MissionStatus.COMPLETED, "Completed", null)
+                return true
+            }
+            events.emit(id, AgentEventType.VERIFICATION, org.json.JSONObject().put("state", a.state.name).put("summary", "The model said it was done, but the evidence disagrees: " + a.summary).toString())
+            evidenceGaps = a.results.filter { !it.passed }.map { "Resolve: ${it.label} (${it.detail})" }.ifEmpty { listOf("Redo the failed work: ${a.summary}") }
         }
-        val gaps = o?.optJSONArray("gaps")?.let { a -> (0 until a.length()).map { a.optString(it).trim() }.filter { it.isNotEmpty() } }.orEmpty()
+        val gaps = evidenceGaps.ifEmpty { o?.optJSONArray("gaps")?.let { a -> (0 until a.length()).map { a.optString(it).trim() }.filter { it.isNotEmpty() } }.orEmpty() }
         r.verifyRounds += 1
         if (r.verifyRounds > limits.maxVerifyRounds || gaps.isEmpty()) {
             if (summary.isNotBlank()) r.m = save(r.m.copy(finalResult = summary))
@@ -506,6 +605,8 @@ class AgentRuntime @Inject constructor(
         r.m = save(r.m.copy(totalSteps = dao.getSteps(id).size))
         return false
     }
+
+    private fun completable(s: VerificationState) = s == VerificationState.VERIFIED || s == VerificationState.EXECUTED
 
     // ---------------------------------------------------------------- helpers
     private suspend fun model(r: Run, purpose: String, system: String, user: String, maxTokens: Int, escalate: Boolean = false): String {
@@ -524,11 +625,43 @@ class AgentRuntime @Inject constructor(
                 if (say != null && say != shown) { shown = say; r.m = save(r.m.copy(currentAction = say.take(110))) }
             }
         }
-        val resp = ai.complete(AiRequest(listOf(AiMessage("system", system), AiMessage("user", user)), maxTokens = maxTokens, purpose = purpose, escalate = escalate, json = true), live)
+        val resp = completeRecorded(r, AiRequest(listOf(AiMessage("system", system), AiMessage("user", user)), maxTokens = maxTokens, purpose = purpose, escalate = escalate, json = true), live)
         val used = if (resp.usage.total > 0) resp.usage.total else (user.length + system.length + resp.text.length) / 4
         r.m = save(r.m.copy(iterations = r.m.iterations + 1, tokensUsed = r.m.tokensUsed + used))
         events.emit(m.id, AgentEventType.MODEL_RESPONSE, "$purpose, ~$used tokens, ${resp.model}")
         return resp.text
+    }
+
+    /**
+     * One model call with diagnostics and bounded self-repair (P4.1/P4.2). Only context overflow and unusable responses are repaired here
+     * (provider outages, keys and rate limits are Failover's job); every repair is counted in the run's ledger and stops when exhausted.
+     */
+    private suspend fun completeRecorded(r: Run, req0: AiRequest, live: (suspend (String) -> Unit)?): AiResponse {
+        var req = req0
+        var retried = req.escalate
+        while (true) {
+            val t0 = System.currentTimeMillis()
+            val promptChars = req.messages.sumOf { it.content.length }
+            val note = "purpose=${req.purpose} policy=${ai.policyName()} escalate=${req.escalate} tools=${req.tools.size} json=${req.json}"
+            try {
+                val resp = ai.complete(req, live)
+                recorder.record(r.m.id, req.purpose, resp.model, System.currentTimeMillis() - t0, null, resp.usage.promptTokens, resp.usage.completionTokens, promptChars, resp.text.length, note, retried)
+                return resp
+            } catch (e: AiError) {
+                recorder.record(r.m.id, req.purpose, "", System.currentTimeMillis() - t0, e, 0, 0, promptChars, 0, note, retried)
+                val kind = FailureClassifier.classify(e)
+                if (kind != FailureKind.CONTEXT_OVERFLOW && kind != FailureKind.STRUCTURED_OUTPUT) throw e
+                val d = r.repairs.decide(kind, "${e.type}|${req.purpose}")
+                if (!d.allowed) throw e
+                events.emit(r.m.id, AgentEventType.SELF_REPAIR, "${e.type.name}: ${d.strategy.name.lowercase().replace('_', ' ')} (${d.reason})")
+                retried = true
+                req = when (d.strategy) {
+                    RepairStrategy.COMPACT_CONTEXT -> req.copy(messages = ContextCompactor.compact(req.messages))
+                    RepairStrategy.SWITCH_MODEL -> req.copy(escalate = true)
+                    else -> req // REPROMPT_STRICT: same request once more; an empty/garbled body is often transient
+                }
+            }
+        }
     }
 
     private suspend fun save(m: MissionEntity): MissionEntity {
@@ -555,5 +688,10 @@ class AgentRuntime @Inject constructor(
             else -> AgentEventType.MISSION_PAUSED
         }
         events.emit(id, type, error.orEmpty())
+        if (status.isTerminal()) {
+            try { verification.record(id, m.finalResult.orEmpty()) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { /* verification is reporting, never a reason to lose the mission result */ }
+        }
     }
 }

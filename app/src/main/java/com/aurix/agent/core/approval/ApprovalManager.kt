@@ -3,6 +3,7 @@ package com.aurix.agent.core.approval
 import com.aurix.agent.core.agent.AgentEventType
 import com.aurix.agent.core.agent.AgentEvents
 import com.aurix.agent.core.mission.MissionDao
+import com.aurix.agent.core.durability.ApprovalFreshness
 import com.aurix.agent.core.security.SecureSettings
 import com.aurix.agent.core.tools.RiskLevel
 import com.aurix.agent.core.tools.Tool
@@ -77,13 +78,17 @@ class ApprovalManager @Inject constructor(
     }
 
     suspend fun request(missionId: String, tool: Tool, name: String, input: JSONObject, reason: String): Decision {
-        val key = approvalKey(name, input)
-        decisionFor(missionId, key)?.let { return it }
+        val risk = tool.riskFor(input)
+        // freshness: an old grant (after a crash, a day later) is never reused; the call is asked again under a new round key
+        val (key, known) = ApprovalFreshness.resolve(dao.getApprovalEvents(missionId), approvalKey(name, input), risk, System.currentTimeMillis())
+        if (known != null) return if (known) Decision.APPROVED else Decision.DENIED
         val wkey = "$missionId:$key"
         val waiter = CompletableDeferred<Boolean>()
         waiters[wkey] = waiter
         try {
-            decisionFor(missionId, key)?.let { return it } // decided between the first check and registering the waiter
+            ApprovalFreshness.resolve(dao.getApprovalEvents(missionId), approvalKey(name, input), risk, System.currentTimeMillis()).let { (k2, d2) ->
+                if (k2 == key && d2 != null) return if (d2) Decision.APPROVED else Decision.DENIED // decided between the first check and registering the waiter
+            }
             val asked = dao.getApprovalEvents(missionId).any {
                 it.type == "APPROVAL_REQUESTED" && (try { JSONObject(it.detail).optString("key") == key } catch (e: Exception) { false })
             }
@@ -110,13 +115,6 @@ class ApprovalManager @Inject constructor(
         }
         events.emit(missionId, if (allow) AgentEventType.APPROVAL_GRANTED else AgentEventType.APPROVAL_DENIED, "$key|${if (allow) "allowed" else "denied"}")
         waiters["$missionId:$key"]?.complete(allow)
-    }
-
-    private suspend fun decisionFor(missionId: String, key: String): Decision? {
-        val d = dao.getApprovalEvents(missionId).lastOrNull {
-            (it.type == "APPROVAL_GRANTED" || it.type == "APPROVAL_DENIED") && it.detail.substringBefore('|') == key
-        } ?: return null
-        return if (d.type == "APPROVAL_GRANTED") Decision.APPROVED else Decision.DENIED
     }
 
     private companion object { const val TIMEOUT_MS = 30 * 60_000L }

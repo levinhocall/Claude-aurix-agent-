@@ -53,6 +53,7 @@ class SettingsViewModel @Inject constructor(
     private val auditExporter: AuditExporter,
     private val manager: AiProviderManager,
     private val memoryRepo: MemoryRepository,
+    private val recorder: com.aurix.agent.core.observability.ModelCallRecorder,
 ) : ViewModel() {
     private val _ui = MutableStateFlow(SettingsState())
     val ui: StateFlow<SettingsState> = _ui.asStateFlow()
@@ -63,10 +64,10 @@ class SettingsViewModel @Inject constructor(
 
     init { viewModelScope.launch(Dispatchers.IO) { reload() } }
 
-    private fun reload(busy: Boolean = _ui.value.busy) {
+    private suspend fun reload(busy: Boolean = _ui.value.busy) {
         _ui.value = SettingsState(store.providers(), store.policy(), usage.budget(), usage.today(), busy, agentSettings.mode() == PermissionMode.STRICT, agentSettings.userName(), agentSettings.wakeEnabled(), agentSettings.alwaysAllowed().sorted(),
             agentSettings.mode() == PermissionMode.JARVIS, agentSettings.memoryEnabled(), agentSettings.aiSeesNotifications(),
-            kotlinx.coroutines.runBlocking { memoryRepo.all() })
+            memoryRepo.all())
         refreshStatus()
     }
 
@@ -149,6 +150,15 @@ class SettingsViewModel @Inject constructor(
     fun setStrict(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setMode(if (on) PermissionMode.STRICT else PermissionMode.STANDARD); reload() } }
 
     fun revokeAlways(tool: String) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setAlwaysAllowed(agentSettings.alwaysAllowed() - tool); reload() } }
+
+    private val _diag = MutableStateFlow("")
+    val diagnostics: StateFlow<String> = _diag.asStateFlow()
+    /** Last 7 days of model calls: latency, provider-reported vs estimated tokens, estimated cost. */
+    fun loadDiagnostics() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _diag.value = try { recorder.summary(System.currentTimeMillis() - 7L * 24 * 3600 * 1000).render() } catch (e: Exception) { "Diagnostics unavailable." }
+        }
+    }
 
     fun exportAudit(onReady: (java.io.File) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {

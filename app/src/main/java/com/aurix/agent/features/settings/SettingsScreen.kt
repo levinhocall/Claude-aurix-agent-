@@ -127,6 +127,9 @@ fun SettingsScreen(onBack: () -> Unit, vm: SettingsViewModel = hiltViewModel()) 
                         Text("Used today: ${ui.todayTokens} tokens", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                         val ctxA = androidx.compose.ui.platform.LocalContext.current
                         OutlinedButton(onClick = { vm.exportAudit { f -> shareFile(ctxA, f) } }) { Text("Export audit log (CSV)") }
+                        val diag by vm.diagnostics.collectAsStateWithLifecycle()
+                        OutlinedButton(onClick = { vm.loadDiagnostics() }) { Text("Model diagnostics (7 days)") }
+                        if (diag.isNotBlank()) Text(diag, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     }
                 }
             }

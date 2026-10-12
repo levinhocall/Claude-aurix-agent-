@@ -55,4 +55,5 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.json.jvm)
+    testImplementation(libs.sqlite.jdbc)
 }

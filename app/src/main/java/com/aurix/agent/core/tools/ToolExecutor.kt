@@ -5,6 +5,8 @@ import com.aurix.agent.core.agent.AgentEvents
 import com.aurix.agent.core.mission.MissionDao
 import com.aurix.agent.core.mission.MissionFileEntity
 import com.aurix.agent.core.mission.ToolCallEntity
+import com.aurix.agent.core.observability.Redactor
+import com.aurix.agent.core.security.ArgValidator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
@@ -24,16 +26,16 @@ class ToolExecutor @Inject constructor(
 ) {
     suspend fun execute(missionId: String, stepIdx: Int, name: String, input: JSONObject, approved: Boolean = false, cloud: Boolean = false): ToolResult {
         val started = System.currentTimeMillis()
-        events.emit(missionId, AgentEventType.TOOL_STARTED, "$name ${input.toString().take(200)}")
+        events.emit(missionId, AgentEventType.TOOL_STARTED, "$name ${Redactor.secrets(input.toString()).take(200)}")
         val result = run(missionId, name, input, approved, cloud)
         val dur = System.currentTimeMillis() - started
         dao.insertToolCall(
             ToolCallEntity(
-                missionId = missionId, stepIdx = stepIdx, tool = name, input = input.toString().take(2000),
-                ok = result.ok, errorType = result.errorType?.name, output = result.output.take(1200), durationMs = dur, ts = started,
+                missionId = missionId, stepIdx = stepIdx, tool = name, input = Redactor.secrets(input.toString()).take(2000),
+                ok = result.ok, errorType = result.errorType?.name, output = Redactor.secrets(result.output).take(1200), durationMs = dur, ts = started,
             )
         )
-        val tail = if (result.ok) "" else " ${result.errorType}: ${result.output.take(150)}"
+        val tail = if (result.ok) "" else " ${result.errorType}: ${Redactor.secrets(result.output).take(150)}"
         events.emit(missionId, if (result.ok) AgentEventType.TOOL_COMPLETED else AgentEventType.TOOL_FAILED, "$name ${dur}ms$tail")
         return result
     }
@@ -43,6 +45,7 @@ class ToolExecutor @Inject constructor(
             ?: return ToolResult.fail(ToolErrorType.INVALID_INPUT, "Unknown tool '$name'. Available: ${registry.names()}")
         val missing = tool.required.filter { !input.has(it) || input.isNull(it) }
         if (missing.isNotEmpty()) return ToolResult.fail(ToolErrorType.INVALID_INPUT, "Missing input field(s): ${missing.joinToString()}. Schema: ${tool.inputSchema}")
+        ArgValidator.validate(tool, input)?.let { return ToolResult.fail(ToolErrorType.INVALID_INPUT, "Invalid input: $it Schema: ${tool.inputSchema.take(300)}") }
         if (tool.riskFor(input).ordinal >= RiskLevel.HIGH.ordinal && !approved) return ToolResult.fail(ToolErrorType.PERMISSION_REQUIRED, "This action needs user approval")
 
         var attempt = 0

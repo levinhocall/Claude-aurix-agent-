@@ -97,7 +97,7 @@ class MissionManager @Inject constructor(
         scope.launch {
             try {
                 val cut = System.currentTimeMillis() - 30L * 24 * 3600 * 1000
-                dao.purgeToolCalls(cut); dao.purgeEvents(cut); dao.purgeSteps(cut); dao.purgeFiles(cut); dao.purgeMissions(cut)
+                dao.purgeToolCalls(cut); dao.purgeEvents(cut); dao.purgeSteps(cut); dao.purgeFiles(cut); dao.purgeCheckpoints(cut); dao.purgeSideEffects(cut); dao.purgeVerifications(cut); dao.purgeModelCalls(System.currentTimeMillis() - 14L * 24 * 3600 * 1000); dao.purgeMissions(cut)
             } catch (_: Exception) { /* retention is best-effort */ }
         }
         scope.launch { dao.getActiveMissions().forEach { start(it.id, IntentRouter.route(it.objective) == null) } }

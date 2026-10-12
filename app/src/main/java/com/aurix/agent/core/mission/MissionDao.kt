@@ -66,4 +66,30 @@ interface MissionDao {
     @Query("DELETE FROM mission_steps WHERE missionId IN (SELECT id FROM missions WHERE status IN ('COMPLETED','FAILED','CANCELLED') AND updatedAt < :cut)") suspend fun purgeSteps(cut: Long)
     @Query("DELETE FROM mission_files WHERE missionId IN (SELECT id FROM missions WHERE status IN ('COMPLETED','FAILED','CANCELLED') AND updatedAt < :cut)") suspend fun purgeFiles(cut: Long)
     @Query("DELETE FROM missions WHERE status IN ('COMPLETED','FAILED','CANCELLED') AND updatedAt < :cut") suspend fun purgeMissions(cut: Long)
+
+    // ---- durability (P3.5)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertCheckpoint(c: CheckpointEntity)
+    @Query("SELECT * FROM mission_checkpoints WHERE missionId = :id") suspend fun getCheckpoint(id: String): CheckpointEntity?
+    @Insert suspend fun insertSideEffect(e: SideEffectEntity): Long
+    @Update suspend fun updateSideEffect(e: SideEffectEntity)
+    @Query("SELECT * FROM side_effects WHERE missionId = :id ORDER BY id") suspend fun getSideEffects(id: String): List<SideEffectEntity>
+    @Query("SELECT * FROM side_effects WHERE id = :id") suspend fun getSideEffect(id: Long): SideEffectEntity?
+
+    @Query("SELECT * FROM tool_calls WHERE missionId = :id ORDER BY id ASC") suspend fun getAllToolCallsFor(id: String): List<ToolCallEntity>
+
+    // ---- verification (P3.7)
+    @Insert suspend fun insertVerification(v: VerificationEntity)
+    @Query("SELECT * FROM verifications WHERE missionId = :id ORDER BY id") suspend fun getVerifications(id: String): List<VerificationEntity>
+    @Query("SELECT * FROM verifications WHERE missionId = :id ORDER BY id") fun observeVerifications(id: String): Flow<List<VerificationEntity>>
+
+    // ---- observability (P4.2)
+    @Insert suspend fun insertModelCall(c: ModelCallEntity)
+    @Query("SELECT * FROM model_calls ORDER BY ts DESC LIMIT :n") suspend fun recentModelCalls(n: Int): List<ModelCallEntity>
+    @Query("SELECT * FROM model_calls WHERE ts >= :since ORDER BY ts DESC LIMIT 2000") suspend fun modelCallsSince(since: Long): List<ModelCallEntity>
+    @Query("DELETE FROM model_calls WHERE ts < :cut") suspend fun purgeModelCalls(cut: Long)
+
+    // retention for the new tables follows the mission purge
+    @Query("DELETE FROM mission_checkpoints WHERE missionId IN (SELECT id FROM missions WHERE status IN ('COMPLETED','FAILED','CANCELLED') AND updatedAt < :cut)") suspend fun purgeCheckpoints(cut: Long)
+    @Query("DELETE FROM side_effects WHERE missionId IN (SELECT id FROM missions WHERE status IN ('COMPLETED','FAILED','CANCELLED') AND updatedAt < :cut)") suspend fun purgeSideEffects(cut: Long)
+    @Query("DELETE FROM verifications WHERE missionId IN (SELECT id FROM missions WHERE status IN ('COMPLETED','FAILED','CANCELLED') AND updatedAt < :cut)") suspend fun purgeVerifications(cut: Long)
 }

@@ -32,6 +32,7 @@ mlkit-text-devanagari = { module = "com.google.mlkit:text-recognition-devanagari
 jsoup = { module = "org.jsoup:jsoup", version = "1.17.2" }
 junit = { module = "junit:junit", version = "4.13.2" }
 json-jvm = { module = "org.json:json", version = "20240303" }
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version = "3.46.1.0" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

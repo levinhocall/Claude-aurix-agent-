@@ -46,6 +46,12 @@ fun buildDetailState(
             "ASSISTANT_NOTE" -> timed += e.ts to Note(e.id, e.detail)
             "RECOVERY_STARTED" -> timed += e.ts to Info(e.id, "↻ " + e.detail, true)
             "PLAN_REVISED" -> timed += e.ts to Info(e.id, "⟳ Plan revised (${e.detail})", false)
+            "VERIFICATION" -> try {
+                val j = JSONObject(e.detail); val st = j.optString("state")
+                timed += e.ts to Info(e.id, (if (st == "VERIFIED") "✔ " else if (st == "EXECUTED") "• " else "⚠ ") + j.optString("summary").take(220), st != "VERIFIED" && st != "EXECUTED")
+            } catch (ex: Exception) { }
+            "SELF_REPAIR" -> timed += e.ts to Info(e.id, "🔧 " + e.detail.take(200), false)
+            "SECURITY_NOTICE" -> timed += e.ts to Info(e.id, "🛡 " + e.detail.take(200), true)
             "MISSION_RESUMED" -> timed += e.ts to Info(e.id, "▶ Resumed", false)
             "MISSION_PAUSED" -> timed += e.ts to Info(e.id, "⏸ Paused" + if (e.detail.isBlank()) "" else " — ${e.detail.take(160)}", false)
         }

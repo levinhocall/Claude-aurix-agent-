@@ -9,12 +9,13 @@ enum class AgentEventType {
     MISSION_CREATED, CONTEXT_PROVIDED, ASSISTANT_NOTE, PLAN_CREATED, PLAN_REVISED, STEP_STARTED, STEP_COMPLETED,
     MODEL_REQUEST, MODEL_RESPONSE, TOOL_STARTED, TOOL_COMPLETED, TOOL_FAILED, APPROVAL_REQUESTED, APPROVAL_GRANTED, APPROVAL_DENIED, QUESTION_ASKED, QUESTION_ANSWERED, RECOVERY_STARTED,
     MISSION_PAUSED, MISSION_RESUMED, MISSION_COMPLETED, MISSION_FAILED, MISSION_CANCELLED,
+    VERIFICATION, SELF_REPAIR, SECURITY_NOTICE,
 }
 
 /** Persistent event log (survives restarts). Never log secrets here. */
 @Singleton
 class AgentEvents @Inject constructor(private val dao: MissionDao) {
     suspend fun emit(missionId: String, type: AgentEventType, detail: String = "") {
-        dao.insertEvent(EventEntity(missionId = missionId, ts = System.currentTimeMillis(), type = type.name, detail = detail.take(500)))
+        dao.insertEvent(EventEntity(missionId = missionId, ts = System.currentTimeMillis(), type = type.name, detail = com.aurix.agent.core.observability.Redactor.secrets(detail).take(500)))
     }
 }

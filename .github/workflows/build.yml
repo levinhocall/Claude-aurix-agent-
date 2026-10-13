@@ -15,7 +15,7 @@ jobs:
       - name: Build
         run: |
           set -o pipefail
-          gradle testDebugUnitTest assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+          gradle testDebugUnitTest assembleDebug assembleDebugAndroidTest --no-daemon --stacktrace 2>&1 | tee build.log
       - name: Surface errors
         if: failure()
         run: |

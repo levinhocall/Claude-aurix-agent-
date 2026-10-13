@@ -44,6 +44,9 @@ class SecureSettings @Inject constructor(@ApplicationContext private val context
     fun getString(key: String): String? = prefs.getString(key, null)
     fun putString(key: String, value: String) { prefs.edit().putString(key, value).apply() }
 
+    /** Synchronous (commit) write for values that must be on disk before anything depends on them, e.g. the DB key. */
+    fun putStringDurable(key: String, value: String): Boolean = prefs.edit().putString(key, value).commit()
+
     private companion object {
         const val K_URL = "base_url"
         const val K_MODEL = "model"

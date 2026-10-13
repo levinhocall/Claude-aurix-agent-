@@ -15,6 +15,7 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.5.0-phase5"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
         release { isMinifyEnabled = false }
@@ -45,6 +46,7 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
     implementation(libs.room.runtime)
+    implementation("net.zetetic:sqlcipher-android:4.6.1@aar") // Room DB encryption (SupportOpenHelperFactory)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
     implementation(libs.okhttp)
@@ -56,4 +58,7 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.json.jvm)
     testImplementation(libs.sqlite.jdbc)
+
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

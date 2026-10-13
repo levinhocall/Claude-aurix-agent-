@@ -44,11 +44,15 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object AppModule {
     @Provides @Singleton
-    fun provideDb(@ApplicationContext c: Context): AppDatabase =
-        Room.databaseBuilder(c, AppDatabase::class.java, "aurix.db")
+    fun provideDb(@ApplicationContext c: Context, secure: com.aurix.agent.core.security.SecureSettings): AppDatabase {
+        val pass = com.aurix.agent.core.security.DbEncryption.passphrase(secure)
+        val outcome = com.aurix.agent.core.security.DbEncryption.prepare(c, "aurix.db", pass)
+        val builder = Room.databaseBuilder(c, AppDatabase::class.java, "aurix.db")
             .fallbackToDestructiveMigrationFrom(1) // v1 (Phase 1 test data) only; later versions get real migrations
             .addMigrations(*com.aurix.agent.core.mission.Migrations.ALL)
-            .build()
+        com.aurix.agent.core.security.DbEncryption.factoryFor(outcome, pass)?.let { builder.openHelperFactory(it) }
+        return builder.build()
+    }
 
     @Provides fun provideDao(db: AppDatabase): MissionDao = db.missionDao()
 

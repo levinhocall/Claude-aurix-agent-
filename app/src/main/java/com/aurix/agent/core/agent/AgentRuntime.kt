@@ -198,7 +198,9 @@ class AgentRuntime @Inject constructor(
             if (titles != null) break
             events.emit(r.m.id, AgentEventType.RECOVERY_STARTED, "Plan was not valid JSON (attempt $attempt)")
         }
-        val steps = titles ?: throw StopMission(MissionStatus.FAILED, "INVALID_INPUT: could not produce a valid plan")
+        val checked = titles?.let { PlanValidator.validate(it, registry.all().map { t -> t.name }.toSet()) }
+        val steps = checked?.steps ?: throw StopMission(MissionStatus.FAILED, "INVALID_INPUT: could not produce a valid plan")
+        if (checked.notes.isNotEmpty()) events.emit(r.m.id, AgentEventType.SELF_REPAIR, "Plan cleaned: " + checked.notes.joinToString("; "))
         dao.upsertSteps(steps.mapIndexed { i, t -> StepEntity(r.m.id, i, t, StepStatus.PENDING) })
         r.m = save(r.m.copy(status = MissionStatus.RUNNING, totalSteps = steps.size, currentAction = "Plan ready"))
         events.emit(r.m.id, AgentEventType.PLAN_CREATED, "${steps.size} steps")
@@ -551,7 +553,8 @@ class AgentRuntime @Inject constructor(
         val id = r.m.id
         val done = steps.filter { it.status == StepStatus.DONE }.joinToString("\n") { "- ${it.title}: ${it.result.orEmpty().take(400)}" }.ifEmpty { "(nothing)" }
         val raw = model(r, "replan", AgentPrompts.replan(registry.names()), "Objective: ${r.m.objective}\nCompleted:\n$done\nFailed step: ${failed.title}\nReason: $reason", 1024)
-        val titles = parseStepList(raw) ?: throw StopMission(MissionStatus.FAILED, "INVALID_INPUT: could not revise the plan")
+        val checked = parseStepList(raw)?.let { PlanValidator.validate(it, registry.all().map { t -> t.name }.toSet()) }
+        val titles = checked?.steps ?: throw StopMission(MissionStatus.FAILED, "INVALID_INPUT: could not revise the plan")
         dao.deleteUnfinishedSteps(id)
         val start = (dao.getSteps(id).maxOfOrNull { it.idx } ?: -1) + 1
         dao.upsertSteps(titles.mapIndexed { i, t -> StepEntity(id, start + i, t, StepStatus.PENDING) })

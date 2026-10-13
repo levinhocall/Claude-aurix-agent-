@@ -59,7 +59,7 @@ class AiProviderManager @Inject constructor(
         val p = store.providers().firstOrNull { it.id == providerId } ?: return "Provider not found"
         if (p.keys.isEmpty() && !p.local) return "Add an API key first"
         val probe = AiRequest(emptyList(), purpose = "test")
-        val model = ModelRouter.modelFor(p, RoutingPolicy.ECONOMY, probe)
+        val model = ModelRouter.modelFor(p, RoutingPolicy.SPEED, probe)
         if (model.isBlank()) return "Set a model name first"
         val out = StringBuilder()
         for (k in if (p.local) listOf(KeyEntry("local-${p.id}", "local", "")) else p.keys) {

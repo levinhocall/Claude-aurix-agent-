@@ -5,9 +5,23 @@ import org.json.JSONObject
 
 enum class ProviderType(val label: String) { OPENAI_COMPATIBLE("OpenAI-compatible"), ANTHROPIC("Anthropic") }
 enum class RoutingPolicy(val label: String, val hint: String) {
-    QUALITY("Quality", "strongest model for everything"),
+    SPEED("Speed", "fast model for everything"),
     BALANCED("Balanced", "strong for plan/verify, fast for steps (escalates on retry)"),
-    ECONOMY("Economy", "fast model for everything"),
+    QUALITY("Quality", "strongest model for everything"),
+    /** Legacy saved value from before SPEED existed. Behaves exactly like SPEED; [ProviderStore] rewrites it to SPEED on read. */
+    ECONOMY("Economy", "legacy alias of Speed");
+
+    companion object {
+        /** Modes a user can pick (ECONOMY is legacy-only). */
+        val selectable: List<RoutingPolicy> = listOf(SPEED, BALANCED, QUALITY)
+
+        /** Tolerant parse of a persisted value: legacy ECONOMY -> SPEED, unknown/blank -> BALANCED. */
+        fun parse(raw: String?): RoutingPolicy = when (raw?.trim()?.uppercase()) {
+            "SPEED", "ECONOMY" -> SPEED
+            "QUALITY" -> QUALITY
+            else -> BALANCED
+        }
+    }
 }
 enum class ModelTier { FAST, STRONG }
 

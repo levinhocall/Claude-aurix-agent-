@@ -28,7 +28,9 @@ class ProviderStore @Inject constructor(private val secure: SecureSettings) {
 
     fun policy(): RoutingPolicy {
         policyCache?.let { return it }
-        val p = try { RoutingPolicy.valueOf(secure.getString(K_POLICY) ?: "") } catch (e: Exception) { RoutingPolicy.BALANCED }
+        val raw = secure.getString(K_POLICY)
+        val p = RoutingPolicy.parse(raw)
+        if (raw == "ECONOMY") secure.putString(K_POLICY, p.name) // one-time migration of the legacy value
         policyCache = p
         return p
     }

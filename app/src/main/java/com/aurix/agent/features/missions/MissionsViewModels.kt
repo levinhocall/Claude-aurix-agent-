@@ -9,6 +9,7 @@ import com.aurix.agent.core.approval.ApprovalManager
 import com.aurix.agent.core.approval.QuestionManager
 import com.aurix.agent.core.ai.routing.ProviderStore
 import com.aurix.agent.core.mission.MissionDao
+import com.aurix.agent.core.mission.ConversationRow
 import com.aurix.agent.core.mission.MissionEntity
 import com.aurix.agent.core.tools.Workspace
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,6 +19,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -30,8 +33,8 @@ class HomeViewModel @Inject constructor(
     private val store: ProviderStore,
     private val agentSettings: AgentSettings,
 ) : ViewModel() {
-    val missions: StateFlow<List<MissionEntity>> =
-        dao.observeMissions().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val conversations: StateFlow<List<ConversationRow>> =
+        dao.observeConversationRows().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _hasKey = MutableStateFlow(true)
     val hasKey: StateFlow<Boolean> = _hasKey.asStateFlow()
@@ -46,10 +49,11 @@ class HomeViewModel @Inject constructor(
     }
 }
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class TranscriptViewModel @Inject constructor(
     savedState: SavedStateHandle,
-    dao: MissionDao,
+    private val dao: MissionDao,
     private val manager: MissionManager,
     private val workspace: Workspace,
     private val approvals: ApprovalManager,
@@ -60,6 +64,13 @@ class TranscriptViewModel @Inject constructor(
     val state: StateFlow<DetailState> = combine(
         dao.observeMission(id), dao.observeSteps(id), dao.observeEventsAsc(id), dao.observeToolCallsAsc(id), dao.observeFiles(id),
     ) { m, steps, events, calls, files -> buildDetailState(m, steps, events, calls, files) }
+        .let { detail ->
+            // earlier messages of the same chat are shown above the current one
+            val earlier = dao.observeMission(id).flatMapLatest { m ->
+                m?.conversationId?.let { cid -> dao.observeConversationMissions(cid) } ?: flowOf(emptyList())
+            }
+            combine(detail, earlier) { d, all -> d.copy(items = historyItems(all, id) + d.items) }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DetailState())
 
     fun fileFor(path: String): File = workspace.resolve(id, path)
@@ -67,12 +78,12 @@ class TranscriptViewModel @Inject constructor(
     fun followUp(text: String, onCreated: (String) -> Unit) {
         val m = state.value.mission
         val ctx = m?.let { "Previous request: ${it.objective.take(120)}. Result: ${(it.finalResult ?: it.error ?: "").take(300)}" }
-        viewModelScope.launch { onCreated(manager.create(text.trim(), ctx)) }
+        viewModelScope.launch { onCreated(manager.create(text.trim(), ctx, m?.conversationId)) }
     }
 
     fun retry(onCreated: (String) -> Unit) {
         val m = state.value.mission ?: return
-        viewModelScope.launch { onCreated(manager.create(m.objective)) }
+        viewModelScope.launch { onCreated(manager.create(m.objective, null, m.conversationId)) }
     }
     fun answer(key: String, text: String) { viewModelScope.launch { questions.answer(id, key, text) } }
     fun decide(key: String, allow: Boolean, tool: String? = null, always: Boolean = false) {

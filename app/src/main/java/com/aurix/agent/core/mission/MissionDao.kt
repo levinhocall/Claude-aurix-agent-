@@ -67,6 +67,16 @@ interface MissionDao {
     @Query("DELETE FROM mission_files WHERE missionId IN (SELECT id FROM missions WHERE status IN ('COMPLETED','FAILED','CANCELLED') AND updatedAt < :cut)") suspend fun purgeFiles(cut: Long)
     @Query("DELETE FROM missions WHERE status IN ('COMPLETED','FAILED','CANCELLED') AND updatedAt < :cut") suspend fun purgeMissions(cut: Long)
 
+    // ---- conversation history (v5)
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertConversation(c: ConversationEntity)
+    @Query("UPDATE conversations SET updatedAt = :now WHERE id = :id") suspend fun touchConversation(id: String, now: Long)
+    @Query(
+        "SELECT c.id AS id, c.title AS title, c.updatedAt AS updatedAt, m.id AS missionId, m.status AS status FROM conversations c " +
+            "JOIN missions m ON m.id = (SELECT id FROM missions WHERE conversationId = c.id ORDER BY createdAt DESC LIMIT 1) ORDER BY c.updatedAt DESC",
+    ) fun observeConversationRows(): Flow<List<ConversationRow>>
+    @Query("SELECT * FROM missions WHERE conversationId = :cid ORDER BY createdAt ASC") fun observeConversationMissions(cid: String): Flow<List<MissionEntity>>
+    @Query("DELETE FROM conversations WHERE id NOT IN (SELECT conversationId FROM missions WHERE conversationId IS NOT NULL)") suspend fun purgeEmptyConversations()
+
     // ---- durability (P3.5)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertCheckpoint(c: CheckpointEntity)
     @Query("SELECT * FROM mission_checkpoints WHERE missionId = :id") suspend fun getCheckpoint(id: String): CheckpointEntity?

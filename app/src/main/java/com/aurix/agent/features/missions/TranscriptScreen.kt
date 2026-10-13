@@ -165,6 +165,13 @@ private fun RenderItem(item: TItem, vm: TranscriptViewModel, ctx: android.conten
                 Text(item.text, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp), style = MaterialTheme.typography.bodyLarge)
             }
         }
+        is HistoryUser -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+            Surface(shape = RoundedCornerShape(18.dp), color = cs.surfaceVariant, modifier = Modifier.widthIn(max = 320.dp)) {
+                Text(item.text, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp), style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+        is HistoryResult -> if (item.failed) Text(item.text, color = cs.error, fontFamily = Mono, fontSize = 12.sp)
+            else SelectionContainer { MarkdownText(item.text) }
         is PlanCard -> PlanView(item)
         is Note -> Text(item.text, style = MaterialTheme.typography.bodyLarge)
         is Info -> Text(item.text, fontFamily = Mono, fontSize = 12.sp, color = if (item.warn) cs.tertiary else cs.onSurfaceVariant)

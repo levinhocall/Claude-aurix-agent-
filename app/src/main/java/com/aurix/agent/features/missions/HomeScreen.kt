@@ -78,7 +78,7 @@ private fun greeting(name: String): String {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onVoice: () -> Unit, vm: HomeViewModel = hiltViewModel()) {
-    val missions by vm.missions.collectAsStateWithLifecycle()
+    val conversations by vm.conversations.collectAsStateWithLifecycle()
     val hasKey by vm.hasKey.collectAsStateWithLifecycle()
     val userName by vm.userName.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.refreshKey() }
@@ -100,12 +100,12 @@ fun HomeScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onVoice: () -> 
                     OutlinedButton(onClick = { scope.launch { drawer.close() } }, modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth()) { Text("+  New chat") }
                     Text("Recents", style = MaterialTheme.typography.titleSmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 4.dp))
                     LazyColumn(Modifier.weight(1f)) {
-                        items(missions, key = { it.id }) { m ->
+                        items(conversations, key = { it.id }) { c ->
                             NavigationDrawerItem(
-                                label = { Text(m.objective, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                badge = { Text(statusGlyph(m.status), color = if (m.status.isActive()) cs.primary else cs.onSurfaceVariant) },
+                                label = { Text(c.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                badge = { Text(statusGlyph(c.status), color = if (c.status.isActive()) cs.primary else cs.onSurfaceVariant) },
                                 selected = false,
-                                onClick = { scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { drawer.snapTo(DrawerValue.Closed) }; onOpen(m.id) },
+                                onClick = { scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { drawer.snapTo(DrawerValue.Closed) }; onOpen(c.missionId) },
                             )
                         }
                     }

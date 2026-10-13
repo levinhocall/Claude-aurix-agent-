@@ -38,6 +38,26 @@ data class MissionEntity(
     val tokensUsed: Int = 0,
     val iterations: Int = 0,
     val recoveries: Int = 0,
+    /** Chat this mission belongs to (null only for rows created before v5 and not yet backfilled). */
+    val conversationId: String? = null,
+)
+
+/** One chat. A conversation groups the missions (messages) the user sent in it, newest activity first in the history list. */
+@Entity(tableName = "conversations")
+data class ConversationEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+/** Row of the history list: a conversation plus the state of its latest mission. */
+data class ConversationRow(
+    val id: String,
+    val title: String,
+    val updatedAt: Long,
+    val missionId: String,
+    val status: MissionStatus,
 )
 
 @Entity(

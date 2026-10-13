@@ -21,6 +21,21 @@ data class ApprovalCard(val approvalKey: String, val tool: String, val summary: 
 data class QuestionCard(val qkey: String, val question: String, val options: List<String>) : TItem { override val key = "question-$qkey" }
 data class FilesBlock(val files: List<MissionFileEntity>) : TItem { override val key = "files" }
 
+/** A finished-or-not earlier message of the same chat, shown read-only above the current mission. */
+data class HistoryUser(val missionId: String, val text: String) : TItem { override val key = "hu-$missionId" }
+data class HistoryResult(val missionId: String, val text: String, val failed: Boolean) : TItem { override val key = "hr-$missionId" }
+
+/** Earlier missions of the chat (everything created before [currentId]) as compact read-only items, oldest first. */
+fun historyItems(all: List<MissionEntity>, currentId: String): List<TItem> {
+    val cut = all.indexOfFirst { it.id == currentId }
+    val earlier = if (cut >= 0) all.subList(0, cut) else emptyList()
+    return earlier.flatMap { m ->
+        val reply = m.finalResult?.takeIf { it.isNotBlank() }?.let { HistoryResult(m.id, it, false) }
+            ?: m.error?.takeIf { it.isNotBlank() && m.status != MissionStatus.COMPLETED }?.let { HistoryResult(m.id, it, true) }
+        listOfNotNull(HistoryUser(m.id, m.objective), reply)
+    }
+}
+
 data class DetailState(val mission: MissionEntity? = null, val items: List<TItem> = emptyList(), val model: String? = null)
 
 fun buildDetailState(

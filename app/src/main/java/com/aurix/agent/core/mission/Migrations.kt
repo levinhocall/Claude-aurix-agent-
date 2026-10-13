@@ -26,5 +26,26 @@ object Migrations {
         override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) { SQL_3_4.forEach { db.execSQL(it) } }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4)
+    /**
+     * v4 -> v5: conversation history. Additive. Every existing mission becomes its own one-message conversation
+     * (id = mission id) so old chats show up in history without losing anything.
+     */
+    val SQL_4_5: List<String> = listOf(
+        "CREATE TABLE IF NOT EXISTS `conversations` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "INSERT OR IGNORE INTO `conversations` (`id`, `title`, `createdAt`, `updatedAt`) SELECT `id`, substr(`objective`, 1, 80), `createdAt`, `updatedAt` FROM `missions`",
+    )
+    /** Separate because SQLite has no ADD COLUMN IF NOT EXISTS; the migration runs it exactly once. */
+    const val SQL_4_5_ADD_COLUMN = "ALTER TABLE `missions` ADD COLUMN `conversationId` TEXT"
+    const val SQL_4_5_BACKFILL = "UPDATE `missions` SET `conversationId` = `id` WHERE `conversationId` IS NULL"
+
+    val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            SQL_4_5.take(1).forEach { db.execSQL(it) }
+            db.execSQL(SQL_4_5_ADD_COLUMN)
+            db.execSQL(SQL_4_5_BACKFILL)
+            SQL_4_5.drop(1).forEach { db.execSQL(it) }
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 }

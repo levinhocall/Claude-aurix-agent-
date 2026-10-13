@@ -10,6 +10,7 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.aurix.agent.core.background.MissionWorker
+import com.aurix.agent.core.mission.ConversationEntity
 import com.aurix.agent.core.mission.MissionDao
 import com.aurix.agent.core.mission.MissionEntity
 import com.aurix.agent.core.mission.MissionStatus
@@ -38,7 +39,7 @@ class MissionManager @Inject constructor(
     private fun wm() = WorkManager.getInstance(context)
     private fun workName(id: String) = "mission-$id"
 
-    suspend fun create(objective0: String, context0: String? = null): String {
+    suspend fun create(objective0: String, context0: String? = null, conversationId: String? = null): String {
         var objective = objective0
         var context = context0
         when (val r = parseRetry(objective0)) {
@@ -50,7 +51,10 @@ class MissionManager @Inject constructor(
         }
         val id = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
-        dao.insertMission(MissionEntity(id = id, objective = objective, createdAt = now, updatedAt = now, status = MissionStatus.CREATED, currentAction = "Queued"))
+        val cid = conversationId ?: id
+        if (conversationId == null) dao.insertConversation(ConversationEntity(id = cid, title = objective.take(80), createdAt = now, updatedAt = now))
+        else dao.touchConversation(cid, now)
+        dao.insertMission(MissionEntity(id = id, objective = objective, createdAt = now, updatedAt = now, status = MissionStatus.CREATED, currentAction = "Queued", conversationId = cid))
         events.emit(id, AgentEventType.MISSION_CREATED, objective.take(120))
         if (!context.isNullOrBlank()) events.emit(id, AgentEventType.CONTEXT_PROVIDED, context.take(480))
         start(id, forceAi(context) || IntentRouter.route(objective) == null)
@@ -97,7 +101,7 @@ class MissionManager @Inject constructor(
         scope.launch {
             try {
                 val cut = System.currentTimeMillis() - 30L * 24 * 3600 * 1000
-                dao.purgeToolCalls(cut); dao.purgeEvents(cut); dao.purgeSteps(cut); dao.purgeFiles(cut); dao.purgeCheckpoints(cut); dao.purgeSideEffects(cut); dao.purgeVerifications(cut); dao.purgeModelCalls(System.currentTimeMillis() - 14L * 24 * 3600 * 1000); dao.purgeMissions(cut)
+                dao.purgeToolCalls(cut); dao.purgeEvents(cut); dao.purgeSteps(cut); dao.purgeFiles(cut); dao.purgeCheckpoints(cut); dao.purgeSideEffects(cut); dao.purgeVerifications(cut); dao.purgeModelCalls(System.currentTimeMillis() - 14L * 24 * 3600 * 1000); dao.purgeMissions(cut); dao.purgeEmptyConversations()
             } catch (_: Exception) { /* retention is best-effort */ }
         }
         scope.launch { dao.getActiveMissions().forEach { start(it.id, IntentRouter.route(it.objective) == null) } }

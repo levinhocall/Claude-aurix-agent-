@@ -80,7 +80,8 @@ object DbEncryption {
     internal fun inspectOrThrow(file: File, pass: String): Pair<Int, Int> {
         val db = SQLiteDatabase.openOrCreateDatabase(file, pass, null, null)
         try {
-            val tables = db.rawQuery("SELECT count(*) FROM sqlite_master WHERE type = 'table'", arrayOf<Any>()).use { c -> c.moveToFirst(); c.getInt(0) }
+            val st = db.compileStatement("SELECT count(*) FROM sqlite_master WHERE type = 'table'")
+            val tables = try { st.simpleQueryForLong().toInt() } finally { st.close() }
             return db.version to tables
         } finally { db.close() }
     }

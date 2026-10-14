@@ -23,7 +23,27 @@ jobs:
         with:
           api-level: 30
           arch: x86_64
-          script: gradle connectedDebugAndroidTest --no-daemon --stacktrace
+          script: gradle connectedDebugAndroidTest --no-daemon --stacktrace > gradle-instrumented.log 2>&1
+      - name: Surface failures as annotations
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob, re, xml.etree.ElementTree as ET
+          def esc(t): return t.replace('%','%25').replace('\r','').replace('\n','%0A')[:3500]
+          found = False
+          for f in glob.glob('app/build/outputs/androidTest-results/**/*.xml', recursive=True):
+              for tc in ET.parse(f).getroot().iter('testcase'):
+                  for bad in list(tc.findall('failure')) + list(tc.findall('error')):
+                      found = True
+                      print('::error title=%s.%s::%s' % (tc.get('classname'), tc.get('name'), esc(bad.text or bad.get('message') or '')))
+          try:
+              log = open('gradle-instrumented.log', errors='replace').read()
+              m = re.search(r'(\* What went wrong:.*?)(\* Try:|\Z)', log, re.S)
+              if m: print('::error title=gradle::' + esc(m.group(1)))
+              elif not found: print('::error title=gradle-tail::' + esc(log[-3000:]))
+          except FileNotFoundError:
+              print('::error title=gradle::no log (emulator did not start)')
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:

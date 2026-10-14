@@ -59,7 +59,7 @@ class EncryptedRecoveryInstrumentedTest {
         db.missionDao().insertMission(mission("m1", MissionStatus.COMPLETED))
         db.close()
         assertFalse(DbEncryption.isPlaintext(dbFile))
-        assertNotNull(DbEncryption.inspect(dbFile, keyA))
+        try { DbEncryption.inspectOrThrow(dbFile, keyA) } catch (e: Throwable) { throw AssertionError("inspect threw " + e + " cause=" + e.cause, e) }
         assertNull(DbEncryption.inspect(dbFile, keyB))
     }
 

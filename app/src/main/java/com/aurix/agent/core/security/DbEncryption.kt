@@ -72,13 +72,18 @@ object DbEncryption {
         if (outcome == Outcome.PLAINTEXT_FALLBACK) null else SupportOpenHelperFactory(pass.toByteArray(Charsets.UTF_8))
 
     /** (user_version, table count) if the file opens with [pass], else null. */
-    internal fun inspect(file: File, pass: String): Pair<Int, Int>? = try {
+    internal fun inspect(file: File, pass: String): Pair<Int, Int>? = try { inspectOrThrow(file, pass) } catch (e: Exception) {
+        Log.w(TAG, "inspect failed: ${e.javaClass.simpleName}")
+        null
+    }
+
+    internal fun inspectOrThrow(file: File, pass: String): Pair<Int, Int> {
         val db = SQLiteDatabase.openOrCreateDatabase(file, pass, null, null)
         try {
             val tables = db.rawQuery("SELECT count(*) FROM sqlite_master WHERE type = 'table'", arrayOf<Any>()).use { c -> c.moveToFirst(); c.getInt(0) }
-            db.version to tables
+            return db.version to tables
         } finally { db.close() }
-    } catch (e: Exception) { null }
+    }
 
     private fun encryptInPlace(file: File, tmp: File, pass: String) {
         tmp.delete()

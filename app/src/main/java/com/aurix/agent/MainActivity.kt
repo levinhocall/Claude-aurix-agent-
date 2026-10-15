@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         openMission.value = i?.getStringExtra(EXTRA_MISSION)
-        val voice = i?.getBooleanExtra(EXTRA_VOICE, false) == true
+        val voice = i?.getBooleanExtra(EXTRA_VOICE, false) == true || i?.action == Intent.ACTION_ASSIST || i?.action == Intent.ACTION_VOICE_COMMAND
         openVoice.value = voice
         if (voice && Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true) }
     }

@@ -62,11 +62,12 @@ object OemGuard {
     }
 
     /** One line the user/model can act on; OEM settings cannot be read back, so only the battery exemption is verifiable. */
-    fun advice(manufacturer: String, ignoringOptimizations: Boolean, bucket: String?, screenControlOn: Boolean): String = buildString {
+    fun advice(manufacturer: String, ignoringOptimizations: Boolean, bucket: String?, screenControlOn: Boolean, assistantOn: Boolean? = null): String = buildString {
         append("device: ").append(manufacturer.ifBlank { "unknown" }).append(" (").append(family(manufacturer)).append(")\n")
         append("battery optimisation exemption: ").append(if (ignoringOptimizations) "ON" else "OFF -> run BATTERY_GUARD action=battery").append('\n')
         if (bucket != null) append("app standby bucket: ").append(bucket).append('\n')
         append("screen control (accessibility) connected: ").append(if (screenControlOn) "yes" else "NO -> SELF_ENABLE_SCREEN_CONTROL or ask the user to toggle it").append('\n')
+        if (assistantOn != null) append("default assistant (power-button/long-press opens AURIX): ").append(if (assistantOn) "yes" else "NO -> run BATTERY_GUARD action=assistant and pick AURIX").append('\n')
         if (family(manufacturer) != "generic") append("autostart/background-run is an OEM setting Android cannot read back: run BATTERY_GUARD action=autostart once and ask the user to enable AURIX there.")
         else append("no OEM-specific autostart screen known for this device; the battery exemption is the main setting.")
     }
@@ -74,8 +75,8 @@ object OemGuard {
 
 private class BatteryGuardTool(private val ctx: Context) : Tool {
     override val name = "BATTERY_GUARD"
-    override val description = "Keep AURIX alive in the background (voice/wake word/missions). action=status | battery (system dialog: ignore battery optimisation) | autostart (open this phone brand's autostart/background screen)."
-    override val inputSchema = """{"action":"status|battery|autostart"}"""
+    override val description = "Keep AURIX alive in the background (voice/wake word/missions). action=status | battery (system dialog: ignore battery optimisation) | autostart (open this phone brand's autostart/background screen) | assistant (open Default digital assistant app settings)."
+    override val inputSchema = """{"action":"status|battery|autostart|assistant"}"""
     override val outputSchema = "status or which screen was opened"
     override val permissions = emptyList<String>()
     override val risk = RiskLevel.LOW

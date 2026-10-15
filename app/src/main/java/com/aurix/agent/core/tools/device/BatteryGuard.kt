@@ -94,12 +94,16 @@ private class BatteryGuardTool(private val ctx: Context) : Tool {
 
     override suspend fun execute(input: JSONObject, ctx0: ToolContext): ToolResult {
         when (input.optString("action", "status").lowercase()) {
-            "status" -> return ToolResult.ok(OemGuard.advice(Build.MANUFACTURER, ignoring(), bucket(), AurixAccessibilityService.instance != null))
+            "status" -> return ToolResult.ok(OemGuard.advice(Build.MANUFACTURER, ignoring(), bucket(), AurixAccessibilityService.instance != null, com.aurix.agent.core.voice.AssistantRole.isDefault(ctx)))
             "battery" -> {
                 if (ignoring()) return ToolResult.ok("Already exempt from battery optimisation [verified]")
                 try { launch(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))) }
                 catch (e: Exception) { try { launch(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } catch (e2: Exception) { throw ToolException(ToolErrorType.TOOL_ERROR, "Could not open battery settings") } }
                 return ToolResult.ok("Opened the battery-optimisation dialog. The user must tap Allow; check with BATTERY_GUARD action=status (unconfirmed until then).")
+            }
+            "assistant" -> {
+                try { launch(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) } catch (e: Exception) { throw ToolException(ToolErrorType.TOOL_ERROR, "Could not open assistant settings. Open Settings -> Apps -> Default apps -> Digital assistant app.") }
+                return ToolResult.ok("Opened Default digital assistant settings. The user must choose AURIX; check with BATTERY_GUARD action=status (unconfirmed until then).")
             }
             "autostart" -> {
                 for (c in OemGuard.candidates(Build.MANUFACTURER)) {
@@ -110,7 +114,7 @@ private class BatteryGuardTool(private val ctx: Context) : Tool {
                 catch (e: Exception) { throw ToolException(ToolErrorType.TOOL_ERROR, "Could not open any settings screen") }
                 return ToolResult.ok("No known autostart screen for ${Build.MANUFACTURER}; opened AURIX app settings (Battery → Unrestricted, if offered). Unverified.")
             }
-            else -> throw ToolException(ToolErrorType.INVALID_INPUT, "action must be status, battery or autostart")
+            else -> throw ToolException(ToolErrorType.INVALID_INPUT, "action must be status, battery, autostart or assistant")
         }
     }
 }

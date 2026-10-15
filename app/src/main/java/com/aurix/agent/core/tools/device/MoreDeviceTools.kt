@@ -165,10 +165,10 @@ class SettingsPanelTool(private val ctx: Context) : Tool {
 
 class WhatsAppMessageTool(private val ctx: Context) : Tool {
     override val name = "WHATSAPP_MESSAGE"
-    override val description = "Open a WhatsApp chat with the message typed; with Screen control on it also taps Send. Always asks the user first. number needs a country code (+91...)."
-    override val inputSchema = """{"to":"contact name","number":"+919876543210","text":"message"}"""
+    override val description = "Open a WhatsApp chat with the message typed; with Screen control on it also taps Send. Always asks the user first. Give the contact name in \"to\": the app finds the real number. Never invent a number; add \"number\" only if the user typed it (with country code)."
+    override val inputSchema = """{"to":"contact name","text":"message"}"""
     override val outputSchema = "result"
-    override val required = listOf("number", "text")
+    override val required = listOf("text")
     override val risk = RiskLevel.HIGH
     override val timeoutMs = 30_000L
     override fun describe(input: JSONObject) = "Send WhatsApp message to ${input.optString("to").ifBlank { "(unnamed)" }} (${input.optString("number")}): \"${input.optString("text").take(120)}\""

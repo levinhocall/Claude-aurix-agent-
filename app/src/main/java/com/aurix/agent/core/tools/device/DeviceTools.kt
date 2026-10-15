@@ -293,10 +293,10 @@ class ClipboardTool(private val ctx: Context) : Tool {
 
 class SendSmsTool(private val ctx: Context) : Tool {
     override val name = "SEND_SMS"
-    override val description = "Send a text message (SMS) to a phone number. Always asks the user for approval first."
-    override val inputSchema = """{"to":"contact name","number":"+919876543210","text":"message"}"""
+    override val description = "Send a text message (SMS). Give the contact name in \"to\": the app finds the real number. Never invent a number; add \"number\" only if the user typed it. Always asks the user for approval first."
+    override val inputSchema = """{"to":"contact name","text":"message"}"""
     override val outputSchema = "confirmation"
-    override val required = listOf("number", "text")
+    override val required = listOf("text")
     override val permissions = listOf("android.permission.SEND_SMS")
     override val risk = RiskLevel.HIGH
     override val timeoutMs = 15_000L
@@ -316,8 +316,8 @@ class SendSmsTool(private val ctx: Context) : Tool {
 
 class CallPhoneTool(private val ctx: Context) : Tool {
     override val name = "CALL_PHONE"
-    override val description = "Place a phone call to a number (use LOOKUP_CONTACT first for names). Always asks the user for approval first."
-    override val inputSchema = """{"number":"+919876543210"}"""
+    override val description = "Place a phone call. Give the contact name in \"to\": the app finds the real number. Never invent a number; add \"number\" only if the user typed it. Always asks the user for approval first."
+    override val inputSchema = """{"to":"contact name"}"""
     override val outputSchema = "confirmation"
     override val required = listOf("number")
     override val permissions = listOf("android.permission.CALL_PHONE")

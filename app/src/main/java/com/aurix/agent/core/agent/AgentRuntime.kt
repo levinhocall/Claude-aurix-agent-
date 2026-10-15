@@ -36,6 +36,7 @@ import com.aurix.agent.core.security.InjectionDetector
 import com.aurix.agent.core.security.UntrustedContent
 import com.aurix.agent.core.tools.project.CodingWorkflow
 import com.aurix.agent.core.tools.RiskLevel
+import com.aurix.agent.core.tools.device.RecipientGuard
 import com.aurix.agent.core.tools.ToolException
 import com.aurix.agent.core.tools.device.ContactResolver
 import com.aurix.agent.core.tools.device.foldText
@@ -94,12 +95,14 @@ class AgentRuntime @Inject constructor(
         var mem: List<String> = emptyList()
         val recent = ArrayDeque<Int>()
         var noNative = false
+        var userAnswers = ""                      // free text the user typed in ASK_USER answers (the only non-request source of a trusted number)
         var tainted = false                       // untrusted content tried to give instructions: risky tools must ask again
         val repairs = RepairLedger()              // bounded self-repair budget for this run
     }
 
     /** Wraps outside-world tool output as fenced data and flags injection attempts (they raise the approval level for the rest of the mission). */
     private suspend fun observe(r: Run, name: String, res: ToolResult): String {
+        if (name == "ASK_USER" && res.ok) r.userAnswers = (r.userAnswers + " " + res.output).takeLast(2000)
         val body = res.output.take(1800)
         val head = if (res.ok) "OK\n" else "ERROR ${res.errorType}\n"
         if (!UntrustedContent.isSource(name)) return head + body
@@ -420,8 +423,20 @@ class AgentRuntime @Inject constructor(
         object Denied : ToolOutcome
     }
 
-    private suspend fun gatedExecute(r: Run, stepIdx: Int, actionTitle: String, name: String, input: JSONObject, say: String, cloud: Boolean): ToolOutcome {
+    private suspend fun gatedExecute(r: Run, stepIdx: Int, actionTitle: String, name: String, input0: JSONObject, say: String, cloud: Boolean, recipientChecked: Boolean = false): ToolOutcome {
         val id = r.m.id
+        var input = input0
+        if (name in RecipientGuard.COMM_TOOLS && !recipientChecked) {
+            val number = input.optString("number")
+            if (RecipientGuard.verdict(number, r.m.objective, r.userAnswers) == RecipientGuard.Verdict.RESOLVE) {
+                val who = input.optString("to").ifBlank { input.optString("contact") }.trim()
+                if (who.isEmpty()) return ToolOutcome.Ran(ToolResult.fail(ToolErrorType.INVALID_INPUT, "RECIPIENT_NOT_VERIFIED: no contact name and no number from the user. Call ASK_USER to ask who it is for. Never invent or reuse an example number."))
+                var failure: String? = null
+                val chosen = resolveContactWith(r, who) { failure = it }
+                if (chosen == null) return ToolOutcome.Ran(ToolResult.fail(ToolErrorType.INVALID_INPUT, "RECIPIENT_NOT_VERIFIED: ${failure ?: "contact not found"} Ask the user for the contact name or their number with ASK_USER. Do not guess a number."))
+                input = JSONObject(input.toString()).put("number", chosen.second).put("to", chosen.first)
+            }
+        }
         val tool = registry.get(name)
         var approved = true // the policy below decides; if no approval is needed (or it was granted) the executor may run HIGH tools
         if (tool != null && (approvals.needsApproval(tool, input) || (r.tainted && tool.riskFor(input) != RiskLevel.LOW))) {
@@ -470,7 +485,7 @@ class AgentRuntime @Inject constructor(
             title = "$shownTitle [${cmd.tool}]"
             dao.upsertSteps(listOf(StepEntity(id, 0, title, StepStatus.RUNNING, null, 1)))
         }
-        return when (val o = gatedExecute(r, 0, shownTitle, cmd.tool, input, "", false)) {
+        return when (val o = gatedExecute(r, 0, shownTitle, cmd.tool, input, "", false, recipientChecked = who != null)) {
             is ToolOutcome.Denied -> {
                 dao.upsertSteps(listOf(StepEntity(id, 0, title, StepStatus.FAILED, "Denied by the user", 1)))
                 r.m = save(r.m.copy(finalResult = "Okay, I did not do it."))
@@ -511,22 +526,24 @@ class AgentRuntime @Inject constructor(
     }
 
     /** (display name, number) of the contact to use, or null after failing the mission. Never guesses: a non-exact or multiple match asks the user. */
-    private suspend fun resolveContact(r: Run, name: String): Pair<String, String>? {
+    private suspend fun resolveContact(r: Run, name: String): Pair<String, String>? = resolveContactWith(r, name) { failLocal(r, it) }
+
+    private suspend fun resolveContactWith(r: Run, name: String, fail: suspend (String) -> Unit): Pair<String, String>? {
         val id = r.m.id
-        val matches = try { contacts.search(name) } catch (e: ToolException) { failLocal(r, e.message ?: "Contacts are not accessible."); return null }
-        if (matches.isEmpty()) { failLocal(r, "No contact matches \"$name\"."); return null }
+        val matches = try { contacts.search(name) } catch (e: ToolException) { fail(e.message ?: "Contacts are not accessible."); return null }
+        if (matches.isEmpty()) { fail("No contact matches \"$name\"."); return null }
         val exact = matches.filter { it.score == 100 }
         if (exact.size == 1) return exact[0].name to exact[0].number
         val pool = (if (exact.size > 1) exact else matches).take(4)
         val labels = pool.map { "${it.name} (…${it.number.filter { c -> c.isDigit() }.takeLast(4)})" }
         r.m = save(r.m.copy(currentAction = "Choosing contact"))
-        val answer = try { questions.ask(id, "Which contact do you mean for \"$name\"?", labels) } catch (e: ToolException) { failLocal(r, e.message ?: "No answer."); return null }
+        val answer = try { questions.ask(id, "Which contact do you mean for \"$name\"?", labels) } catch (e: ToolException) { fail(e.message ?: "No answer."); return null }
         r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = "Working"))
         val a = foldText(answer)
         val hit = pool.indices.firstOrNull { labels[it] == answer }
             ?: pool.indices.firstOrNull { i -> a.isNotEmpty() && foldText(pool[i].name).let { it == a || it.contains(a) } }
             ?: pool.indices.firstOrNull { i -> a.isNotEmpty() && a.all { it.isDigit() } && pool[i].number.filter { it.isDigit() }.endsWith(a) }
-        if (hit == null) { failLocal(r, "I could not tell which contact you meant (\"$answer\")."); return null }
+        if (hit == null) { fail("I could not tell which contact you meant (\"$answer\")."); return null }
         return pool[hit].name to pool[hit].number
     }
 

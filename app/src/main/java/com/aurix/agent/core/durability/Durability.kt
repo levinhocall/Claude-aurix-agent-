@@ -37,7 +37,7 @@ object SideEffectPolicy {
         "PLACE_SAVE", "FILE_EDIT", "FILE_WRITE", "CLEAR_NOTIFICATIONS", "NOTIFICATION_CLEAR", "MEMORY_SAVE",
     )
     private val readOnlyStorage = setOf("STORAGE_LIST", "STORAGE_SEARCH", "STORAGE_READ", "STORAGE_INFO")
-    private val readOnlyScreen = setOf("SCREEN_READ", "SCREEN_WAIT")
+    private val readOnlyScreen = setOf("SCREEN_READ", "SCREEN_WAIT", "SCREEN_LOOK")
 
     /** Repeating these twice has a visible effect (double SMS, second alarm, repeated tap/submit, second file write). Unknown risky tools count too. */
     fun isNonIdempotent(tool: String, risk: RiskLevel): Boolean = when {

@@ -50,6 +50,30 @@ class AurixAccessibilityService : AccessibilityService() {
     override fun onUnbind(intent: Intent?): Boolean { if (instance === this) instance = null; return super.onUnbind(intent) }
     override fun onDestroy() { if (instance === this) instance = null; super.onDestroy() }
 
+    /** Software screenshot (API 30+, needs canTakeScreenshot). Fails clearly on protected windows. */
+    suspend fun screenshot(): android.graphics.Bitmap {
+        if (Build.VERSION.SDK_INT < 30) throw com.aurix.agent.core.tools.ToolException(com.aurix.agent.core.tools.ToolErrorType.TOOL_ERROR, "Screenshot needs Android 11 or newer")
+        repeat(2) { attempt ->
+            val code = suspendCancellableCoroutine<Any> { c ->
+                takeScreenshot(android.view.Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                    override fun onSuccess(result: ScreenshotResult) {
+                        val hw = android.graphics.Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
+                        val soft = hw?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                        result.hardwareBuffer.close()
+                        if (c.isActive) c.resume(soft ?: -1)
+                    }
+                    override fun onFailure(errorCode: Int) { if (c.isActive) c.resume(errorCode) }
+                })
+            }
+            if (code is android.graphics.Bitmap) return code
+            val err = code as Int
+            if (err == ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT && attempt == 0) { kotlinx.coroutines.delay(1200); return@repeat }
+            val why = if (err == ERROR_TAKE_SCREENSHOT_SECURE_WINDOW) "this window is protected (FLAG_SECURE), Android blocks screenshots here" else "screenshot failed (code $err)"
+            throw com.aurix.agent.core.tools.ToolException(com.aurix.agent.core.tools.ToolErrorType.TOOL_ERROR, "Cannot look at the screen: $why. Use SCREEN_READ or ask the user.")
+        }
+        throw com.aurix.agent.core.tools.ToolException(com.aurix.agent.core.tools.ToolErrorType.TOOL_ERROR, "Screenshot failed")
+    }
+
     fun foregroundPackage(): String = rootInActiveWindow?.packageName?.toString().orEmpty()
 
     // ------------------------------------------------------------------ reading

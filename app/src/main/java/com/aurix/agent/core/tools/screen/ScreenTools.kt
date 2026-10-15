@@ -69,6 +69,22 @@ private class ScreenReadTool : ScreenTool() {
     }
 }
 
+/** Vision fallback: when SCREEN_READ shows few/no elements (WebView, Flutter, games, canvas), read the pixels with on-device OCR. */
+private class ScreenLookTool : ScreenTool() {
+    override val name = "SCREEN_LOOK"
+    override val description = "Screenshot + on-device OCR (English/Hindi) of the current screen. Returns visible text with x,y centers to use with SCREEN_TAP {x,y}. Use when SCREEN_READ finds little or nothing."
+    override val inputSchema = "{}"
+    override val outputSchema = "screen size + text items with x,y"
+    override val risk = RiskLevel.MEDIUM
+    override val timeoutMs = 45_000L
+    override fun describe(input: JSONObject) = "Look at the screen (${appNote()})"
+    override suspend fun execute(input: JSONObject, ctx: ToolContext): ToolResult {
+        val s = svc()
+        val items = ScreenVision.recognize(s)
+        return ToolResult.ok(LookFormat.format(s.foregroundPackage(), items))
+    }
+}
+
 private class ScreenTapTool : ScreenTool() {
     override val name = "SCREEN_TAP"
     override val description = "Tap an on-screen element by id (from SCREEN_READ), by visible text, or at x,y. long=true long-presses. Returns the new screen."
@@ -180,5 +196,5 @@ private class ScreenWaitTool : ScreenTool() {
 }
 
 object ScreenTools {
-    fun all(): List<Tool> = listOf(ScreenReadTool(), ScreenTapTool(), ScreenTypeTool(), ScreenScrollTool(), ScreenKeyTool(), ScreenWaitTool())
+    fun all(): List<Tool> = listOf(ScreenReadTool(), ScreenLookTool(), ScreenTapTool(), ScreenTypeTool(), ScreenScrollTool(), ScreenKeyTool(), ScreenWaitTool())
 }

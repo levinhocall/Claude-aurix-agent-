@@ -136,7 +136,7 @@ class DeviceInfoTool(private val ctx: Context) : Tool {
 
 class SettingsPanelTool(private val ctx: Context) : Tool {
     override val name = "OPEN_SETTINGS_PANEL"
-    override val description = "Open a system settings panel (wifi/internet, bluetooth, volume, nfc, display, battery, location, sound, accessibility). Android does not let apps toggle Wi-Fi/Bluetooth directly; the user flips the switch."
+    override val description = "Open a system settings panel (wifi/internet, bluetooth, volume, nfc, display, battery, location, sound, accessibility). Android does not let apps toggle Wi-Fi/Bluetooth directly; the user flips the switch. If Shizuku is running, prefer PHONE_TOGGLE."
     override val inputSchema = """{"panel":"bluetooth"}"""
     override val outputSchema = "confirmation"
     override val required = listOf("panel")

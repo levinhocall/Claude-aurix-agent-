@@ -48,6 +48,8 @@ dependencies {
     implementation(libs.room.runtime)
     implementation("net.zetetic:sqlcipher-android:4.6.1@aar") // Room DB encryption (SupportOpenHelperFactory)
     implementation(libs.room.ktx)
+    implementation("dev.rikka.shizuku:api:13.1.5") // optional shell layer (PHONE_TOGGLE etc.); works only when the user runs Shizuku
+    implementation("dev.rikka.shizuku:provider:13.1.5")
     ksp(libs.room.compiler)
     implementation(libs.okhttp)
     implementation(libs.jsoup)

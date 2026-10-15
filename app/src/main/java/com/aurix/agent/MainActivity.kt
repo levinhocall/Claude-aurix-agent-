@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import com.aurix.agent.core.approval.AgentSettings
@@ -38,7 +39,7 @@ class MainActivity : ComponentActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         startWakeWordIfEnabled()
-        setContent { AurixTheme { AurixNav(openMission.value, openVoice.value) { openMission.value = null; openVoice.value = false } } }
+        setContent { AurixTheme { androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) { AurixNav(openMission.value, openVoice.value) { openMission.value = null; openVoice.value = false }; com.aurix.agent.features.glow.EdgeGlow() } } }
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -41,7 +41,10 @@ data class SettingsState(
     val memoryEnabled: Boolean = true,
     val aiSeesNotifs: Boolean = false,
     val memories: List<MemoryEntity> = emptyList(),
+    val guards: GuardsUi = GuardsUi(),
 )
+
+data class GuardsUi(val blocked: String = "", val off: Set<String> = emptySet(), val vault: List<String> = emptyList())
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -54,6 +57,7 @@ class SettingsViewModel @Inject constructor(
     private val manager: AiProviderManager,
     private val memoryRepo: MemoryRepository,
     private val recorder: com.aurix.agent.core.observability.ModelCallRecorder,
+    private val guards: com.aurix.agent.core.guard.Guards,
 ) : ViewModel() {
     private val _ui = MutableStateFlow(SettingsState())
     val ui: StateFlow<SettingsState> = _ui.asStateFlow()
@@ -67,7 +71,7 @@ class SettingsViewModel @Inject constructor(
     private suspend fun reload(busy: Boolean = _ui.value.busy) {
         _ui.value = SettingsState(store.providers(), store.policy(), usage.budget(), usage.today(), busy, agentSettings.mode() == PermissionMode.STRICT, agentSettings.userName(), agentSettings.wakeEnabled(), agentSettings.alwaysAllowed().sorted(),
             agentSettings.mode() == PermissionMode.JARVIS, agentSettings.memoryEnabled(), agentSettings.aiSeesNotifications(),
-            memoryRepo.all())
+            memoryRepo.all(), GuardsUi(agentSettings.sentinelBlockedRaw(), agentSettings.connectorsOff(), guards.vault.names()))
         refreshStatus()
     }
 
@@ -183,6 +187,10 @@ class SettingsViewModel @Inject constructor(
     fun setJarvis(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setMode(if (on) PermissionMode.JARVIS else PermissionMode.STANDARD); reload() } }
     fun setMemoryEnabled(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setMemoryEnabled(on); reload() } }
     fun setAiSeesNotifs(on: Boolean) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setAiSeesNotifications(on); reload() } }
+    fun setConnector(group: String, on: Boolean) { viewModelScope.launch(Dispatchers.IO) { val s = agentSettings.connectorsOff().toMutableSet(); if (on) s.remove(group) else s.add(group); agentSettings.setConnectorsOff(s); reload() } }
+    fun saveBlocked(raw: String) { viewModelScope.launch(Dispatchers.IO) { agentSettings.setSentinelBlocked(raw); reload() } }
+    fun vaultPut(name: String, value: String) { viewModelScope.launch(Dispatchers.IO) { guards.vault.put(name, value); reload() } }
+    fun vaultDelete(name: String) { viewModelScope.launch(Dispatchers.IO) { guards.vault.delete(name); reload() } }
     fun deleteMemory(id: Long) { viewModelScope.launch(Dispatchers.IO) { memoryRepo.delete(id); reload() } }
     fun clearMemories() { viewModelScope.launch(Dispatchers.IO) { memoryRepo.clear(); reload() } }
 

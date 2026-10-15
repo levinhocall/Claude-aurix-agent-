@@ -99,6 +99,7 @@ fun SettingsScreen(onBack: () -> Unit, vm: SettingsViewModel = hiltViewModel()) 
             item { VoiceSection(ui, vm) }
             item { ApprovalAndPermissions(ui, vm) }
             item { MemorySection(ui, vm) }
+            item { GuardsSection(ui, vm) }
             item { TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Advanced ▾" else "Advanced ▸") } }
             if (advanced) {
                 item {

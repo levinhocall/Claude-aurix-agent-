@@ -38,7 +38,7 @@ object Sentinel {
 
 /** Vault: secrets live only in encrypted storage. The model sees {{vault:NAME}}; the real value is substituted at the last moment, only for typing into a screen field. */
 object VaultCodec {
-    private val token = Regex("\\{\\{vault:([A-Za-z0-9_]{1,32})}}")
+    private val token = Regex("\\{\\{vault:([A-Za-z0-9_]{1,32})\\}\\}")
     /** Tools allowed to receive a real secret. Anything that sends data out (web, SMS, email, files) is excluded on purpose: that is how a hijacked task would leak it. */
     val SECRET_TOOLS = setOf("SCREEN_TYPE")
 

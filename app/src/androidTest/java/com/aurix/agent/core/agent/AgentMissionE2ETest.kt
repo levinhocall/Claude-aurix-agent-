@@ -25,6 +25,10 @@ import com.aurix.agent.core.mission.MissionStatus
 import com.aurix.agent.core.observability.ModelCallRecorder
 import com.aurix.agent.core.security.SecureSettings
 import com.aurix.agent.core.tools.CalculatorTool
+import com.aurix.agent.core.tools.RiskLevel
+import com.aurix.agent.core.tools.Tool
+import com.aurix.agent.core.tools.ToolContext
+import com.aurix.agent.core.tools.ToolResult
 import com.aurix.agent.core.tools.FileReadTool
 import com.aurix.agent.core.tools.FileWriteTool
 import com.aurix.agent.core.tools.ToolExecutor
@@ -62,6 +66,18 @@ class AgentMissionE2ETest {
     private lateinit var db: AppDatabase
     private lateinit var ws: Workspace
     private lateinit var runtime: AgentRuntime
+    private class RecordingWhatsApp : Tool {
+        val calls = mutableListOf<JSONObject>()
+        override val name = "WHATSAPP_MESSAGE"
+        override val description = "test double"
+        override val inputSchema = """{"to":"contact name","text":"message"}"""
+        override val outputSchema = "result"
+        override val required = listOf("text")
+        override val risk = RiskLevel.HIGH
+        override val timeoutMs = 5_000L
+        override suspend fun execute(input: JSONObject, ctx: ToolContext): ToolResult { calls += input; return ToolResult.ok("sent") }
+    }
+    private val wa = RecordingWhatsApp()
     private val requests = mutableListOf<String>() // every prompt the "model" received
 
     /** script(systemText, userText, requestIndex) -> raw model reply */
@@ -101,7 +117,7 @@ class AgentMissionE2ETest {
         val ai = AiProviderManager(store, KeyPool { System.currentTimeMillis() }, UsageTracker(ctx), client)
         val events = AgentEvents(dao)
         ws = Workspace(ctx)
-        val registry = ToolRegistry(listOf(CalculatorTool(), FileWriteTool(ws), FileReadTool(ws)))
+        val registry = ToolRegistry(listOf(CalculatorTool(), FileWriteTool(ws), FileReadTool(ws), wa))
         val settings = AgentSettings(secure)
         val notifier = MissionNotifier(ctx)
         val questions = QuestionManager(dao, events, notifier)
@@ -182,5 +198,23 @@ class AgentMissionE2ETest {
         val mission = runBlocking { db.missionDao().getMission(id) }!!
         assertFalse("must not complete without the file: ${mission.status}", mission.status == MissionStatus.COMPLETED)
         assertFalse(ws.resolve(id, "report.txt").exists())
+    }
+
+    @Test fun hallucinatedWhatsAppNumberNeverReachesTheTool() {
+        val id = "e2e-wa"
+        script = { system, user ->
+            when {
+                systemIs(system, "Planner for an autonomous phone agent") -> """{"steps":["Send the letter to nazib on WhatsApp [WHATSAPP_MESSAGE]"]}"""
+                systemIs(system, "Run ONE step") ->
+                    if (user.contains("RECIPIENT_NOT_VERIFIED")) """{"action":"finish","status":"blocked","result":"could not verify the recipient"}"""
+                    else """{"action":"tool","say":"sending","tool":"WHATSAPP_MESSAGE","input":{"to":"nazib","number":"+919876543210","text":"hello"}}"""
+                else -> "{}"
+            }
+        }
+        startMission(id, "send hello to nazib on WhatsApp")
+        runBlocking { withTimeout(90_000) { runtime.run(id) } }
+        assertTrue("the made-up number must never be sent to: ${wa.calls}", wa.calls.isEmpty())
+        assertTrue(requests.any { it.contains("RECIPIENT_NOT_VERIFIED") })
+        assertFalse(runBlocking { db.missionDao().getMission(id) }!!.status == MissionStatus.COMPLETED)
     }
 }

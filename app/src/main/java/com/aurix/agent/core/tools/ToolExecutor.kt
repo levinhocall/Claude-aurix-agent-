@@ -24,14 +24,14 @@ class ToolExecutor @Inject constructor(
     private val events: AgentEvents,
     private val workspace: Workspace,
 ) {
-    suspend fun execute(missionId: String, stepIdx: Int, name: String, input: JSONObject, approved: Boolean = false, cloud: Boolean = false): ToolResult {
+    suspend fun execute(missionId: String, stepIdx: Int, name: String, input: JSONObject, approved: Boolean = false, cloud: Boolean = false, logInput: JSONObject = input, redact: (String) -> String = { it }): ToolResult {
         val started = System.currentTimeMillis()
-        events.emit(missionId, AgentEventType.TOOL_STARTED, "$name ${Redactor.secrets(input.toString()).take(200)}")
-        val result = run(missionId, name, input, approved, cloud)
+        events.emit(missionId, AgentEventType.TOOL_STARTED, "$name ${Redactor.secrets(logInput.toString()).take(200)}")
+        val result = run(missionId, name, input, approved, cloud).let { if (it.output.isEmpty()) it else it.copy(output = redact(it.output)) }
         val dur = System.currentTimeMillis() - started
         dao.insertToolCall(
             ToolCallEntity(
-                missionId = missionId, stepIdx = stepIdx, tool = name, input = Redactor.secrets(input.toString()).take(2000),
+                missionId = missionId, stepIdx = stepIdx, tool = name, input = Redactor.secrets(logInput.toString()).take(2000),
                 ok = result.ok, errorType = result.errorType?.name, output = Redactor.secrets(result.output).take(1200), durationMs = dur, ts = started,
             )
         )

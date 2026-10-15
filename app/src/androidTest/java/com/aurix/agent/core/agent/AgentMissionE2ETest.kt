@@ -127,6 +127,7 @@ class AgentMissionE2ETest {
             ApprovalManager(dao, events, settings, registry), notifier, ContactResolver(ctx), questions,
             MemoryRepository(dao, settings), settings, CheckpointStore(dao), journal,
             SideEffectReconciler(journal, questions, events), VerificationService(dao, ws, events), ModelCallRecorder(dao),
+            com.aurix.agent.core.guard.Guards(com.aurix.agent.core.guard.Vault(secure), settings),
         )
     }
 

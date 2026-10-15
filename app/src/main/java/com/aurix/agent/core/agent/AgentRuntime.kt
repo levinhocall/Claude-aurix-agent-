@@ -78,6 +78,7 @@ class AgentRuntime @Inject constructor(
     private val reconciler: SideEffectReconciler,
     private val verification: VerificationService,
     private val recorder: ModelCallRecorder,
+    private val guards: com.aurix.agent.core.guard.Guards,
 ) {
     private val limits = AgentLimits()
     private val stopRequests = ConcurrentHashMap<String, MissionStatus>()
@@ -425,6 +426,10 @@ class AgentRuntime @Inject constructor(
 
     private suspend fun gatedExecute(r: Run, stepIdx: Int, actionTitle: String, name: String, input0: JSONObject, say: String, cloud: Boolean, recipientChecked: Boolean = false): ToolOutcome {
         val id = r.m.id
+        guards.connectorOff(name)?.let { g ->
+            events.emit(id, AgentEventType.SECURITY_NOTICE, "$name blocked: \"$g\" is turned off in Settings")
+            return ToolOutcome.Ran(ToolResult.fail(ToolErrorType.PERMISSION_REQUIRED, "CONNECTOR_DISABLED: $g is turned off by the user (Settings → Guards). Do not retry; tell the user."))
+        }
         var input = input0
         if (name in RecipientGuard.COMM_TOOLS && !recipientChecked) {
             val number = input.optString("number")
@@ -437,12 +442,31 @@ class AgentRuntime @Inject constructor(
                 input = JSONObject(input.toString()).put("number", chosen.second).put("to", chosen.first)
             }
         }
+        var forceApproval = false
+        var forceReason = ""
+        if (name == "WEB_BROWSER") {
+            val d = guards.web(input.optString("url"), r.tainted)
+            if (d.verdict == com.aurix.agent.core.guard.WebVerdict.BLOCK) {
+                events.emit(id, AgentEventType.SECURITY_NOTICE, "Sentinel blocked ${input.optString("url").take(80)}: ${d.reason}")
+                return ToolOutcome.Ran(ToolResult.fail(ToolErrorType.PERMISSION_REQUIRED, "SENTINEL_BLOCKED: ${d.reason}. Do not open this URL; use another source or tell the user."))
+            }
+            if (d.verdict == com.aurix.agent.core.guard.WebVerdict.ASK) { forceApproval = true; forceReason = " [Sentinel: ${d.reason}]"; events.emit(id, AgentEventType.SECURITY_NOTICE, "Sentinel asks about ${input.optString("url").take(80)}: ${d.reason}") }
+        }
+        var execInput = input
+        if (com.aurix.agent.core.guard.VaultCodec.hasToken(input)) {
+            if (name !in com.aurix.agent.core.guard.VaultCodec.SECRET_TOOLS || r.tainted)
+                return ToolOutcome.Ran(ToolResult.fail(ToolErrorType.PERMISSION_REQUIRED, "VAULT_NOT_ALLOWED: secrets can only be typed with SCREEN_TYPE, and not after suspicious content was seen."))
+            val secrets = guards.vault.all()
+            val missing = com.aurix.agent.core.guard.VaultCodec.tokens(input).filter { it !in secrets }
+            if (missing.isNotEmpty()) return ToolOutcome.Ran(ToolResult.fail(ToolErrorType.INVALID_INPUT, "VAULT_MISSING: ${missing.joinToString()} not saved. Ask the user to add it in Settings → Guards. Never ask for the value in chat."))
+            execInput = com.aurix.agent.core.guard.VaultCodec.substitute(input, secrets)
+        }
         val tool = registry.get(name)
         var approved = true // the policy below decides; if no approval is needed (or it was granted) the executor may run HIGH tools
-        if (tool != null && (approvals.needsApproval(tool, input) || (r.tainted && tool.riskFor(input) != RiskLevel.LOW))) {
+        if (tool != null && (approvals.needsApproval(tool, input) || forceApproval || (r.tainted && tool.riskFor(input) != RiskLevel.LOW))) {
             r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_APPROVAL, currentAction = "Waiting for your approval: $name"))
             notifier.approvalNeeded(r.m, tool.describe(input))
-            val decision = approvals.request(id, tool, name, input, say)
+            val decision = approvals.request(id, tool, name, input, say + forceReason)
             r.m = save(r.m.copy(status = MissionStatus.RUNNING, currentAction = actionTitle))
             if (decision == Decision.TIMED_OUT) throw StopMission(MissionStatus.PAUSED, "Approval timed out. Tap Resume to ask again.")
             if (decision == Decision.DENIED) return ToolOutcome.Denied
@@ -457,7 +481,7 @@ class AgentRuntime @Inject constructor(
         }
         r.m = save(r.m.copy(status = MissionStatus.WAITING_FOR_TOOL, currentAction = "Using $name"))
         val jid = if (nonIdempotent) journal.begin(id, stepIdx, name, input, tool?.describe(input) ?: name) else -1L
-        var res = tools.execute(id, stepIdx, name, input, approved, cloud)
+        var res = tools.execute(id, stepIdx, name, execInput, approved, cloud, logInput = input, redact = { guards.redact(it) })
         if (jid >= 0) {
             journal.finish(jid, res.ok, res.errorType)
             if (SideEffectPolicy.stateAfter(res.ok, res.errorType) == SideEffectState.UNCERTAIN)

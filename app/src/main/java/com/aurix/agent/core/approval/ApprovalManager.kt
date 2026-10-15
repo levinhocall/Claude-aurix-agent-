@@ -43,6 +43,11 @@ class AgentSettings @Inject constructor(private val secure: SecureSettings) {
     fun setAiSeesNotifications(on: Boolean) { secure.putString("ai_sees_notifs", if (on) "1" else "0") }
     fun alwaysAllowed(): Set<String> = secure.getString("always_allow").orEmpty().split(',').filter { it.isNotBlank() }.toSet()
     fun setAlwaysAllowed(s: Set<String>) { secure.putString("always_allow", s.joinToString(",")) }
+    fun sentinelBlocked(): Set<String> = secure.getString("sentinel_blocked").orEmpty().split(',', ' ', '\n', ';').map { it.trim().lowercase() }.filter { it.contains('.') }.toSet()
+    fun sentinelBlockedRaw(): String = secure.getString("sentinel_blocked").orEmpty()
+    fun setSentinelBlocked(raw: String) { secure.putString("sentinel_blocked", raw.trim().take(2000)) }
+    fun connectorsOff(): Set<String> = secure.getString("connectors_off").orEmpty().split('|').filter { it.isNotBlank() }.toSet()
+    fun setConnectorsOff(s: Set<String>) { secure.putString("connectors_off", s.joinToString("|")) }
     fun elevenKey(): String = secure.getString("eleven_key").orEmpty()
     fun setElevenKey(k: String) { secure.putString("eleven_key", k.trim()) }
     fun elevenVoice(): String = secure.getString("eleven_voice")?.takeIf { it.isNotBlank() } ?: "21m00Tcm4TlvDq8ikWAM"

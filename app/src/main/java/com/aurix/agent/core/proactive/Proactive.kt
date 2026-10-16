@@ -48,6 +48,7 @@ object Proactive {
 class ProactiveReceiver : BroadcastReceiver() {
     @Inject lateinit var settings: AgentSettings
     @Inject lateinit var manager: MissionManager
+    @Inject lateinit var engine: TriggerEngine
 
     @SuppressLint("MissingPermission")
     override fun onReceive(ctx: Context, intent: Intent) {
@@ -56,13 +57,14 @@ class ProactiveReceiver : BroadcastReceiver() {
             try {
                 if (!settings.proactive()) return@launch
                 when (intent.action) {
-                    Intent.ACTION_BATTERY_LOW -> Proactive.notify(ctx, 7101, "Battery low", "Tap to check battery status", "battery kitni hai")
+                    Intent.ACTION_BATTERY_LOW -> { Proactive.notify(ctx, 7101, "Battery low", "Tap to check battery status", "battery kitni hai"); engine.fire(TriggerEvent.BATTERY_LOW) }
                     BluetoothDevice.ACTION_ACL_CONNECTED -> {
                         val allowed = Build.VERSION.SDK_INT < 31 || ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
                         if (!allowed) return@launch
                         val dev = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
                         else @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                         if (matchesCar(dev?.name, settings.carBluetooth())) manager.create("driving mode on")
+                        dev?.name?.let { engine.fire(TriggerEvent.BLUETOOTH, it) }
                     }
                 }
             } catch (_: Exception) {

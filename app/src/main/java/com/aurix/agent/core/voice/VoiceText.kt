@@ -42,7 +42,7 @@ object SpeechChunker {
 fun speakable(text: String): String {
     var s = spokenText(text)
     s = s.replace(Regex("[\\p{So}\\p{Cs}\\uFE0F\\u200D]"), "")
-    s = s.replace(Regex("(?<![\\d])(?:\\+?91[\\s-]?)?(\\d[\\s-]?){10}(?![\\d])")) { m -> m.value.filter { it.isDigit() }.takeLast(10).toCharArray().joinToString(" ") }
+    s = s.replace(Regex("(?<![\\d])(?:\\+?91[\\s-]?)?(\\d[\\s-]?){9}\\d(?![\\d])")) { m -> m.value.filter { it.isDigit() }.takeLast(10).toCharArray().joinToString(" ") }
     s = s.replace(Regex("₹\\s?([\\d,.]+)")) { "${it.groupValues[1]} rupees" }
     s = s.replace("%", " percent")
     return s.replace(Regex("\\s+"), " ").trim()

@@ -18,6 +18,19 @@ data class ContactMatch(val name: String, val number: String, val score: Int)
 /** Accent-insensitive, ranked contact search (exact name beats partial). Used by LOOKUP_CONTACT and by the offline message/call flow. */
 @Singleton
 class ContactResolver @Inject constructor(@ApplicationContext private val ctx: Context) {
+    /** Distinct contact display names (for speech-recognition biasing). Empty when the permission is off; never throws. */
+    suspend fun names(limit: Int = 150): List<String> = withContext(Dispatchers.IO) {
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return@withContext emptyList()
+        val out = LinkedHashSet<String>()
+        try {
+            ctx.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME), null, null, null)?.use { c ->
+                var n = 0
+                while (c.moveToNext() && n++ < 20_000 && out.size < limit) c.getString(0)?.trim()?.takeIf { it.isNotEmpty() }?.let { out += it }
+            }
+        } catch (e: Exception) { }
+        out.toList()
+    }
+
     suspend fun search(query: String, limit: Int = 5): List<ContactMatch> = withContext(Dispatchers.IO) {
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED)
             throw ToolException(ToolErrorType.PERMISSION_REQUIRED, "Contacts permission is not granted. Open AURIX → Settings → Phone permissions and grant it.")
